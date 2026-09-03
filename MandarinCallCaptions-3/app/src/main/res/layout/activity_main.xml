@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center_horizontal">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Mandarin Call Captions"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:paddingBottom="12dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Live Simplified-Chinese captions for calls. On ordinary Android phones, cellular downlink audio cannot be directly captured by a normal app, so turn on speakerphone. The accessibility service keeps microphone recognition available during the call."
+        android:textSize="17sp"
+        android:lineSpacingExtra="4dp"
+        android:paddingBottom="24dp" />
+
+    <Button
+        android:id="@+id/permissionButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="1. Allow microphone" />
+
+    <Button
+        android:id="@+id/accessibilityButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="2. Enable caption accessibility service" />
+
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:textSize="16sp"
+        android:text="Status: not configured" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:textSize="14sp"
+        android:text="Tip: during a cellular call, switch the call to speakerphone and keep the phone near the speaker. Captions appear as an overlay. Recognition availability and Mandarin quality depend on the speech-recognition service installed on the device." />
+</LinearLayout>
