@@ -1,0 +1,77 @@
+name: Build Android APK v8
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36 and build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Download official SenseVoice INT8 model
+        working-directory: MandarinCallCaptions-8
+        run: |
+          set -euxo pipefail
+          rm -rf app/src/main/assets/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17
+          mkdir -p app/src/main/assets
+          cd app/src/main/assets
+
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o sensevoice.tar.bz2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+
+          tar -xjf sensevoice.tar.bz2
+          rm sensevoice.tar.bz2
+
+          test -f sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx
+          test -f sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt
+
+          ls -lh sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/
+
+      - name: Build APK
+        working-directory: MandarinCallCaptions-8
+        run: gradle assembleDebug --stacktrace
+
+      - name: Verify APK exists
+        working-directory: MandarinCallCaptions-8
+        run: test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify APK signature
+        working-directory: MandarinCallCaptions-8
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs \
+            app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Show APK package info
+        working-directory: MandarinCallCaptions-8
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging \
+            app/build/outputs/apk/debug/app-debug.apk | head -30
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MandarinCallCaptions-v8-SamsungA16
+          path: MandarinCallCaptions-8/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

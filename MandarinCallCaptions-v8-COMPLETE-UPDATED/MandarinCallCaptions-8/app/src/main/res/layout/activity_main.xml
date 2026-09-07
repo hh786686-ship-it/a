@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Mandarin Call Captions"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:paddingBottom="10dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Live Mandarin captions in Chinese characters only. No pinyin and no translation. For ordinary cellular calls, use speakerphone so the microphone can hear the other caller."
+            android:textSize="16sp"
+            android:lineSpacingExtra="3dp"
+            android:paddingBottom="20dp" />
+
+        <Button
+            android:id="@+id/permissionButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. Allow microphone" />
+
+        <Button
+            android:id="@+id/accessibilityButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="2. Enable caption accessibility service" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:textSize="15sp"
+            android:text="Status: not configured" />
+
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp"
+            android:text="Caption videos / phone audio"
+            android:textSize="21sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="For compatible videos, podcasts, games, and apps, Android can capture the sound playing inside the phone and turn Mandarin speech into Chinese captions. Android will ask for permission each time. Protected/DRM audio and some apps may block capture."
+            android:textSize="14sp"
+            android:lineSpacingExtra="2dp" />
+
+        <Button
+            android:id="@+id/startInternalAudioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Start phone audio captions" />
+
+        <Button
+            android:id="@+id/stopInternalAudioButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Stop phone audio captions" />
+
+        <TextView
+            android:id="@+id/internalAudioStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Phone audio captions: off"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="Floating caption window"
+            android:textSize="21sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widthLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Window width: 90%"
+            android:textSize="16sp" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/widthSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:valueFrom="50"
+            android:valueTo="100"
+            android:stepSize="5"
+            android:value="90" />
+
+        <TextView
+            android:id="@+id/heightLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Window height: 25%"
+            android:textSize="16sp" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/heightSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:valueFrom="10"
+            android:valueTo="70"
+            android:stepSize="5"
+            android:value="25" />
+
+        <TextView
+            android:id="@+id/fontLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Caption text size: 24"
+            android:textSize="16sp" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/fontSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:valueFrom="18"
+            android:valueTo="38"
+            android:stepSize="1"
+            android:value="24" />
+
+        <TextView
+            android:id="@+id/linesLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Visible caption lines: 4"
+            android:textSize="16sp" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/linesSlider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:valueFrom="1"
+            android:valueTo="6"
+            android:stepSize="1"
+            android:value="4" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="Adjust the floating window width and height independently. New captions stay anchored at the bottom of the window. When the selected line limit is reached, only the oldest caption is removed. Changes apply to the overlay while the accessibility service is running."
+            android:textSize="14sp"
+            android:lineSpacingExtra="2dp"
+            android:paddingBottom="24dp" />
+
+    </LinearLayout>
+</ScrollView>
