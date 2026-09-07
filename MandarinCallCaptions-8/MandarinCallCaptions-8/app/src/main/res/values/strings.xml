@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Mandarin Call Captions</string>
+    <string name="accessibility_description">Shows live Mandarin speech captions in an accessibility overlay. For cellular calls, use speakerphone so the microphone can hear the remote caller.</string>
+</resources>

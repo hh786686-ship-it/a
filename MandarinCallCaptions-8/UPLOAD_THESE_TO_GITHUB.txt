@@ -1,0 +1,9 @@
+UPLOAD BOTH ITEMS TO THE ROOT OF YOUR GITHUB REPOSITORY:
+
+1. .github
+2. MandarinCallCaptions-8
+
+Then:
+Actions -> Build Android APK v8 -> Run workflow
+
+Do not nest .github inside MandarinCallCaptions-8.
