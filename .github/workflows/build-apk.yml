@@ -21,7 +21,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android API
-      run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -29,10 +29,11 @@ jobs:
           gradle-version: '9.5.0'
 
       - name: Build APK
+        working-directory: MandarinCallCaptions-5
         run: gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MandarinCallCaptions-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MandarinCallCaptions-v5-APK
+          path: MandarinCallCaptions-5/app/build/outputs/apk/debug/app-debug.apk
