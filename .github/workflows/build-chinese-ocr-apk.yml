@@ -67,6 +67,14 @@ jobs:
           assert len(chars)+2==18710, f'Vocabulary count mismatch: {len(chars)}'
           print('PASS official recognition dictionary,',len(chars),'characters')
           PY
+      - name: Test real MinerU OCR on a Chinese image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk >/dev/null
+          python3 -m pip install --quiet numpy pillow onnxruntime==1.23.2
+          python3 ChineseOCR-Android/tests/mineru_real_ocr_test.py
       - name: Compile offline debug APK
         working-directory: ChineseOCR-Android
         run: gradle --no-daemon :app:assembleDebug
