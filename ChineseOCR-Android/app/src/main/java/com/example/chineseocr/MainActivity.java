@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
     LinearLayout box=new LinearLayout(this);box.setOrientation(1);box.setPadding(26,30,26,24);
     ScrollView sc=new ScrollView(this);sc.addView(box);setContentView(sc);
     TextView title=new TextView(this);title.setText("Chinese OCR + Pinyin");title.setTextSize(25);box.addView(title);
-    TextView info=new TextView(this);info.setText("Offline PDF/DOCX converter • experimental Android build. OCR text and pronunciation can be incorrect. PDF bold and highlights are not retained.");box.addView(info);
+    TextView info=new TextView(this);info.setText("Offline PDF/DOCX converter • experimental. Editable DOCX text colour, underline and highlights are retained where stored directly on text runs. Scanned-PDF formatting is approximate.");box.addView(info);
     Button pick=new Button(this);pick.setText("Choose PDF or DOCX");box.addView(pick);
     pick.setOnClickListener(v->{ Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"});startActivityForResult(i,OPEN);});
     range=new EditText(this);range.setHint("Original pages e.g. 2-7 (blank = all)");range.setSingleLine(true);box.addView(range);
@@ -147,15 +147,17 @@ public class MainActivity extends Activity {
           StringBuilder recognized=new StringBuilder();
           for(Text.TextBlock block:t.getTextBlocks()){
             for(Text.Line line:block.getLines()){
-              String value=line.getText();
-              if(value==null||value.trim().isEmpty())continue;
-              Rect bounds=line.getBoundingBox();
-              int flags=0;
-              if(bounds!=null){
-                if(underlined(bmp,bounds))flags|=2;
-                if(yellowHighlight(bmp,bounds))flags|=4;
+              // ML Kit character/element bounding boxes allow different words
+              // on the same line to keep different colours and underlines.
+              for(Text.Element element:line.getElements()){
+                String value=element.getText();
+                if(value==null||value.isEmpty())continue;
+                Rect bounds=element.getBoundingBox();
+                WordStyles.Style style=estimateStyle(bmp,bounds);
+                recognized.append(WordStyles.begin(style)).append(value).append(WordStyles.end());
+                recognized.append(' ');
               }
-              recognized.append('\uE000').append((char)('0'+flags)).append(value).append('\uE000').append('0').append('\n');
+              recognized.append('\n');
             }
           }
           texts.add(recognized.toString());
@@ -165,33 +167,64 @@ public class MainActivity extends Activity {
     }
     return texts;
   }
-  // Estimated visual formatting for scanned images; never a guaranteed style match.
-  private boolean underlined(Bitmap bitmap,Rect rect) {
-    int w=bitmap.getWidth(),h=bitmap.getHeight();
-    int l=Math.max(0,rect.left+3),r=Math.min(w-1,rect.right-3);
-    if(r-l<40)return false;
-    for(int y=Math.max(0,rect.bottom-2);y<Math.min(h,rect.bottom+9);y++){
+  // Pixel-based styling is a best-effort estimate and can confuse coloured
+  // watermarks, decoration, and thin CJK strokes with text formatting.
+  private WordStyles.Style estimateStyle(Bitmap bitmap,Rect rect){
+    if(rect==null||rect.width()<1||rect.height()<1)return WordStyles.Style.normal();
+    boolean underline=underlined(bitmap,rect);
+    String ink=inkColor(bitmap,rect);
+    String highlight=highlightColor(bitmap,rect);
+    return new WordStyles.Style(false,underline,ink,highlight);
+  }
+  private boolean underlined(Bitmap bmp,Rect r){
+    int left=Math.max(0,r.left+2),right=Math.min(bmp.getWidth()-1,r.right-2);
+    if(right-left<9)return false;
+    // Check for a continuous dark line below the glyph baseline.
+    for(int y=Math.max(r.top+2,r.bottom-2);y<Math.min(bmp.getHeight(),r.bottom+6);y++){
       int dark=0,total=0;
-      for(int x=l;x<r;x+=2){
-        int c=bitmap.getPixel(x,y);
-        int gray=(Color.red(c)+Color.green(c)+Color.blue(c))/3;
-        if(gray<110)dark++; total++;
+      for(int x=left;x<=right;x++){
+        int c=bmp.getPixel(x,y);
+        int min=Math.min(Color.red(c),Math.min(Color.green(c),Color.blue(c)));
+        if(min<100)dark++;total++;
       }
-      if(total>0&&(double)dark/total>0.77)return true;
+      if(total>0&&(double)dark/total>0.78)return true;
     }
     return false;
   }
-  private boolean yellowHighlight(Bitmap bitmap,Rect rect) {
-    int l=Math.max(0,rect.left),r=Math.min(bitmap.getWidth(),rect.right);
-    int t=Math.max(0,rect.top),b=Math.min(bitmap.getHeight(),rect.bottom);
-    int sampled=0,yellow=0;
-    for(int y=t;y<b;y+=4)for(int x=l;x<r;x+=4){
-      int c=bitmap.getPixel(x,y);
-      int red=Color.red(c),green=Color.green(c),blue=Color.blue(c);
-      if(red>145&&green>125&&blue<Math.min(red,green)*0.73)yellow++;
-      sampled++;
+  private String inkColor(Bitmap bmp,Rect r){
+    int left=Math.max(0,r.left),right=Math.min(bmp.getWidth(),r.right);
+    int top=Math.max(0,r.top),bottom=Math.min(bmp.getHeight(),r.bottom);
+    long rs=0,gs=0,bs=0;int matched=0;
+    // Count saturated, dark-ish foreground pixels; ignore paper/background.
+    for(int y=top;y<bottom;y+=2)for(int x=left;x<right;x+=2){
+      int c=bmp.getPixel(x,y),red=Color.red(c),green=Color.green(c),blue=Color.blue(c);
+      int max=Math.max(red,Math.max(green,blue)),min=Math.min(red,Math.min(green,blue));
+      if(max-min>=65&&min<155&&max<245){
+        rs+=red;gs+=green;bs+=blue;matched++;
+      }
     }
-    return sampled>0&&(double)yellow/sampled>0.12;
+    if(matched<Math.max(4,(right-left)*(bottom-top)/220))return null;
+    int red=(int)(rs/matched),green=(int)(gs/matched),blue=(int)(bs/matched);
+    return String.format(java.util.Locale.ROOT,"%02X%02X%02X",red,green,blue);
+  }
+  private String highlightColor(Bitmap bmp,Rect r){
+    int left=Math.max(0,r.left),right=Math.min(bmp.getWidth(),r.right);
+    int top=Math.max(0,r.top),bottom=Math.min(bmp.getHeight(),r.bottom);
+    int yellow=0,green=0,cyan=0,pink=0,samples=0;
+    for(int y=top;y<bottom;y+=3)for(int x=left;x<right;x+=3){
+      int c=bmp.getPixel(x,y),red=Color.red(c),g=Color.green(c),blue=Color.blue(c);
+      if(red>165&&g>165&&blue<Math.min(red,g)-40)yellow++;
+      else if(g>155&&red<g-35&&blue<g-25)green++;
+      else if(g>150&&blue>150&&red<Math.min(g,blue)-35)cyan++;
+      else if(red>155&&blue>125&&g<Math.min(red,blue)-45)pink++;
+      samples++;
+    }
+    int threshold=Math.max(5,(int)(samples*0.15));
+    if(yellow>threshold)return "FFFF00";
+    if(green>threshold)return "00FF00";
+    if(cyan>threshold)return "00FFFF";
+    if(pink>threshold)return "FF00FF";
+    return null;
   }
   private ArrayList<String> extractDocx(Uri uri)throws Exception{
     byte[] doc;
@@ -225,28 +258,13 @@ public class MainActivity extends Activity {
     String n=node.getLocalName();String ns=node.getNamespaceURI();
     if("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(ns)){
       if("r".equals(n)){
-        int flags=0;
+        WordStyles.Style style=WordStyles.fromRun(node);
+        current.append(WordStyles.begin(style));
         NodeList children=node.getChildNodes();
-        for(int k=0;k<children.getLength();k++){
-          Node pr=children.item(k);
-          if(!"rPr".equals(pr.getLocalName()))continue;
-          NodeList props=pr.getChildNodes();
-          for(int q=0;q<props.getLength();q++){
-            Node attr=props.item(q);String prop=attr.getLocalName();
-            Node val=attr.getAttributes()==null?null:attr.getAttributes().getNamedItemNS(ns,"val");
-            String v=val==null?"":val.getNodeValue();
-            if("b".equals(prop)&&!"0".equals(v)&&!"false".equals(v))flags|=1;
-            if("u".equals(prop)&&!"none".equals(v))flags|=2;
-            if("highlight".equals(prop)&&!"none".equals(v))flags|=4;
-            if("shd".equals(prop)&&attr.getAttributes()!=null){
-              Node fill=attr.getAttributes().getNamedItemNS(ns,"fill");
-              if(fill!=null&&!"FFFFFF".equalsIgnoreCase(fill.getNodeValue())&&!"auto".equalsIgnoreCase(fill.getNodeValue()))flags|=4;
-            }
-          }
-        }
-        current.append('\uE000').append((char)('0'+flags));
-        for(int k=0;k<children.getLength();k++)if(!"rPr".equals(children.item(k).getLocalName()))appendDocxText(children.item(k),current,pages);
-        current.append('\uE000').append('0');
+        for(int k=0;k<children.getLength();k++)
+          if(!"rPr".equals(children.item(k).getLocalName()))
+            appendDocxText(children.item(k),current,pages);
+        current.append(WordStyles.end());
         return;
       }
       if("t".equals(n)){current.append(node.getTextContent());return;}
@@ -274,20 +292,8 @@ public class MainActivity extends Activity {
     ArrayList<Integer> order=new ArrayList<>(chosen);Collections.sort(order);return order;
   }
   private static String escape(String s){return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");}
-  private static String style(int flags){
-    StringBuilder b=new StringBuilder();
-    if((flags&1)!=0)b.append("<w:b/>");
-    if((flags&2)!=0)b.append("<w:u w:val=\"single\"/>");
-    if((flags&4)!=0)b.append("<w:highlight w:val=\"yellow\"/>");
-    return b.toString();
-  }
-  private static String run(String s){return run(s,0);}
-  private static String run(String s,int flags){
-    return "<w:r><w:rPr>"+style(flags)+"</w:rPr><w:t xml:space=\"preserve\">"+escape(s)+"</w:t></w:r>";
-  }
-  private static String ruby(String s,String py,int flags){
-    String size="<w:sz w:val=\"11\"/>";
-    return "<w:ruby><w:rubyPr><w:rubyAlign w:val=\"center\"/><w:hps w:val=\"11\"/><w:hpsRaise w:val=\"22\"/><w:hpsBaseText w:val=\"20\"/></w:rubyPr><w:rt><w:r><w:rPr>"+size+"</w:rPr><w:t>"+escape(py)+"</w:t></w:r></w:rt><w:rubyBase><w:r><w:rPr>"+style(flags)+"</w:rPr><w:t>"+escape(s)+"</w:t></w:r></w:rubyBase></w:ruby>";
+  private static String run(String s){
+    return "<w:r><w:t xml:space=\"preserve\">"+WordStyles.escape(s)+"</w:t></w:r>";
   }
   private static String pinyin(char c){
     try{
@@ -306,18 +312,7 @@ public class MainActivity extends Activity {
     for(int page=0;page<pages.size();page++){
       if(page>0)body.append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
       body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>").append(run(String.valueOf(nums.get(page)))).append("</w:p>");
-      String[] lines=pages.get(page).split("\\R",-1);
-      for(String line:lines){
-        body.append("<w:p><w:pPr><w:spacing w:before=\"30\" w:after=\"30\" w:line=\"600\" w:lineRule=\"atLeast\"/></w:pPr>");
-        int active=0;
-        for(int i=0;i<line.length();i++){
-          char c=line.charAt(i);
-          if(c=='\uE000'&&i+1<line.length()){active=Math.max(0,Math.min(7,line.charAt(++i)-'0'));continue;}
-          String py=pinyin(c);
-          body.append(py.isEmpty()?run(String.valueOf(c),active):ruby(String.valueOf(c),py,active));
-        }
-        body.append("</w:p>");
-      }
+      WordStyles.appendText(body,pages.get(page),MainActivity::pinyin);
     }
     String doc="<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"+body+"<w:sectPr/></w:body></w:document>";
     String types="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>";
