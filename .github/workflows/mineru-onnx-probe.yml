@@ -21,6 +21,23 @@ jobs:
           print(json.dumps(matches[:150],indent=2,ensure_ascii=False))
           with open('/tmp/mineru-model-list.json','w') as f:json.dump(matches,f)
           PY
+      - name: Download real MinerU OCR models and inspect ONNX input/output
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p /tmp/mineru-ocr
+          curl -fL --retry 3 --max-time 180 -o /tmp/mineru-ocr/det.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_tiny_det_infer.onnx
+          curl -fL --retry 3 --max-time 180 -o /tmp/mineru-ocr/rec.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_small_rec_infer.onnx
+          python3 -m pip install --quiet onnxruntime==1.23.2
+          python3 - <<'PY'
+          import onnxruntime as ort
+          for name in ('det','rec'):
+            p='/tmp/mineru-ocr/'+name+'.onnx'
+            sess=ort.InferenceSession(p,providers=['CPUExecutionProvider'])
+            print('MODEL_NAME',name)
+            print('MODEL_INPUTS',[(x.name,x.shape,x.type) for x in sess.get_inputs()])
+            print('MODEL_OUTPUTS',[(x.name,x.shape,x.type) for x in sess.get_outputs()])
+          PY
       - name: Check compatibility of ONNX Runtime Android package
         shell: bash
         run: |
