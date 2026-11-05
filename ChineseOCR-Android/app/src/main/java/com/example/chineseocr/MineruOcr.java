@@ -49,7 +49,7 @@ final class MineruOcr implements AutoCloseable {
   private static float[] chw(Bitmap bitmap,int w,int h,boolean detection){
     int[] pixels=new int[w*h];
     bitmap.getPixels(pixels,0,w,0,0,w,h);
-    float[] tensor=new float[w*h*3], plane=w*h;
+    float[] tensor=new float[w*h*3];
     for(int i=0;i<pixels.length;i++){
       int argb=pixels[i],r=Color.red(argb),g=Color.green(argb),b=Color.blue(argb);
       float[] c={r/255.0f,g/255.0f,b/255.0f};
