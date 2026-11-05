@@ -70,6 +70,22 @@ public final class PixelWordStyleTest {
     ok("505050".equals(s.highlight),"white cover lettering remains visible on dark shading");
     ok(!s.bold,"dark cover background is not misclassified as bold text");
 
+    // End-to-end style metadata -> actual Word ruby-base XML export.
+    WordStyles.Style thick=PixelWordStyle.estimate(bold,20,14,125,40);
+    WordStyles.Style underlinedRed=PixelWordStyle.estimate(red,20,15,90,39);
+    WordStyles.Style yellowHighlight=PixelWordStyle.estimate(yellow,20,15,90,39);
+    String encoded=WordStyles.begin(thick)+"粗"+WordStyles.end()
+      +WordStyles.begin(underlinedRed)+"红"+WordStyles.end()
+      +WordStyles.begin(yellowHighlight)+"黄"+WordStyles.end();
+    StringBuilder docx=new StringBuilder();
+    WordStyles.appendText(docx,encoded,c->"zhōng");
+    String xml=docx.toString();
+    ok(xml.contains("<w:b/>"),"scanned bold survives conversion to Word ruby XML");
+    ok(xml.contains("<w:u w:val=\\"single\\"/>"),"scanned underline survives conversion to Word ruby XML");
+    ok(xml.contains("<w:color w:val=\\"CC0A28\\"/>"),"scanned red ink survives conversion to Word ruby XML");
+    ok(xml.contains("w:fill=\\"FFFF00\\""),"scanned yellow highlight survives conversion to Word ruby XML");
+
+
 
   }
 }
