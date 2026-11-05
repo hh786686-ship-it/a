@@ -37,8 +37,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/word-style-test
-          javac -encoding UTF-8 -d /tmp/word-style-test ChineseOCR-Android/app/src/main/java/com/example/chineseocr/WordStyles.java ChineseOCR-Android/tests/WordStylesTest.java
+          javac -encoding UTF-8 -d /tmp/word-style-test ChineseOCR-Android/app/src/main/java/com/example/chineseocr/WordStyles.java ChineseOCR-Android/app/src/main/java/com/example/chineseocr/PixelWordStyle.java ChineseOCR-Android/tests/WordStylesTest.java ChineseOCR-Android/tests/PixelWordStyleTest.java
           java -cp /tmp/word-style-test com.example.chineseocr.WordStylesTest /tmp/word-style-test/regression.docx
+          java -cp /tmp/word-style-test com.example.chineseocr.PixelWordStyleTest
           python3 - <<'PY'
           from zipfile import ZipFile
           from xml.etree import ElementTree as ET
