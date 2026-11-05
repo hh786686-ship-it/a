@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.content.*;
 import android.graphics.*;
+import android.graphics.Rect;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
@@ -96,12 +97,54 @@ public class MainActivity extends Activity {
           bmp.eraseColor(Color.WHITE);
           page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
           Text t=Tasks.await(recognizer.process(InputImage.fromBitmap(bmp,0)));
-          texts.add(t.getText());
+          StringBuilder recognized=new StringBuilder();
+          for(Text.TextBlock block:t.getTextBlocks()){
+            for(Text.Line line:block.getLines()){
+              String value=line.getText();
+              if(value==null||value.trim().isEmpty())continue;
+              Rect bounds=line.getBoundingBox();
+              int flags=0;
+              if(bounds!=null){
+                if(underlined(bmp,bounds))flags|=2;
+                if(yellowHighlight(bmp,bounds))flags|=4;
+              }
+              recognized.append('\\uE000').append((char)('0'+flags)).append(value).append('\\uE000').append('0').append('\\n');
+            }
+          }
+          texts.add(recognized.toString());
           bmp.recycle();
         }
       }
     }
     return texts;
+  }
+  // Estimated visual formatting for scanned images; never a guaranteed style match.
+  private boolean underlined(Bitmap bitmap,Rect rect) {
+    int w=bitmap.getWidth(),h=bitmap.getHeight();
+    int l=Math.max(0,rect.left+3),r=Math.min(w-1,rect.right-3);
+    if(r-l<40)return false;
+    for(int y=Math.max(0,rect.bottom-2);y<Math.min(h,rect.bottom+9);y++){
+      int dark=0,total=0;
+      for(int x=l;x<r;x+=2){
+        int c=bitmap.getPixel(x,y);
+        int gray=(Color.red(c)+Color.green(c)+Color.blue(c))/3;
+        if(gray<110)dark++; total++;
+      }
+      if(total>0&&(double)dark/total>0.77)return true;
+    }
+    return false;
+  }
+  private boolean yellowHighlight(Bitmap bitmap,Rect rect) {
+    int l=Math.max(0,rect.left),r=Math.min(bitmap.getWidth(),rect.right);
+    int t=Math.max(0,rect.top),b=Math.min(bitmap.getHeight(),rect.bottom);
+    int sampled=0,yellow=0;
+    for(int y=t;y<b;y+=4)for(int x=l;x<r;x+=4){
+      int c=bitmap.getPixel(x,y);
+      int red=Color.red(c),green=Color.green(c),blue=Color.blue(c);
+      if(red>145&&green>125&&blue<Math.min(red,green)*0.73)yellow++;
+      sampled++;
+    }
+    return sampled>0&&(double)yellow/sampled>0.12;
   }
   private ArrayList<String> extractDocx(Uri uri)throws Exception{
     byte[] doc;
@@ -134,6 +177,31 @@ public class MainActivity extends Activity {
   private void appendDocxText(Node node,StringBuilder current,ArrayList<String> pages){
     String n=node.getLocalName();String ns=node.getNamespaceURI();
     if("http://schemas.openxmlformats.org/wordprocessingml/2006/main".equals(ns)){
+      if("r".equals(n)){
+        int flags=0;
+        NodeList children=node.getChildNodes();
+        for(int k=0;k<children.getLength();k++){
+          Node pr=children.item(k);
+          if(!"rPr".equals(pr.getLocalName()))continue;
+          NodeList props=pr.getChildNodes();
+          for(int q=0;q<props.getLength();q++){
+            Node attr=props.item(q);String prop=attr.getLocalName();
+            Node val=attr.getAttributes()==null?null:attr.getAttributes().getNamedItemNS(ns,"val");
+            String v=val==null?"":val.getNodeValue();
+            if("b".equals(prop)&&!"0".equals(v)&&!"false".equals(v))flags|=1;
+            if("u".equals(prop)&&!"none".equals(v))flags|=2;
+            if("highlight".equals(prop)&&!"none".equals(v))flags|=4;
+            if("shd".equals(prop)&&attr.getAttributes()!=null){
+              Node fill=attr.getAttributes().getNamedItemNS(ns,"fill");
+              if(fill!=null&&!"FFFFFF".equalsIgnoreCase(fill.getNodeValue())&&!"auto".equalsIgnoreCase(fill.getNodeValue()))flags|=4;
+            }
+          }
+        }
+        current.append('\\uE000').append((char)('0'+flags));
+        for(int k=0;k<children.getLength();k++)if(!"rPr".equals(children.item(k).getLocalName()))appendDocxText(children.item(k),current,pages);
+        current.append('\\uE000').append('0');
+        return;
+      }
       if("t".equals(n)){current.append(node.getTextContent());return;}
       if("tab".equals(n)){current.append('\t');return;}
       if("br".equals(n)){
@@ -159,12 +227,20 @@ public class MainActivity extends Activity {
     ArrayList<Integer> order=new ArrayList<>(chosen);Collections.sort(order);return order;
   }
   private static String escape(String s){return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");}
-  private static String run(String s){
-    return "<w:r><w:t xml:space=\"preserve\">"+escape(s)+"</w:t></w:r>";
+  private static String style(int flags){
+    StringBuilder b=new StringBuilder();
+    if((flags&1)!=0)b.append("<w:b/>");
+    if((flags&2)!=0)b.append("<w:u w:val=\\"single\\"/>");
+    if((flags&4)!=0)b.append("<w:highlight w:val=\\"yellow\\"/>");
+    return b.toString();
   }
-  private static String ruby(String s,String py){
-    String size="<w:sz w:val=\"12\"/>";
-    return "<w:ruby><w:rubyPr><w:rubyAlign w:val=\"center\"/><w:hps w:val=\"12\"/><w:hpsRaise w:val=\"12\"/><w:hpsBaseText w:val=\"20\"/></w:rubyPr><w:rt><w:r><w:rPr>"+size+"</w:rPr><w:t>"+escape(py)+"</w:t></w:r></w:rt><w:rubyBase><w:r><w:t>"+escape(s)+"</w:t></w:r></w:rubyBase></w:ruby>";
+  private static String run(String s){return run(s,0);}
+  private static String run(String s,int flags){
+    return "<w:r><w:rPr>"+style(flags)+"</w:rPr><w:t xml:space=\\"preserve\\">"+escape(s)+"</w:t></w:r>";
+  }
+  private static String ruby(String s,String py,int flags){
+    String size="<w:sz w:val=\\"11\\"/>";
+    return "<w:ruby><w:rubyPr><w:rubyAlign w:val=\\"center\\"/><w:hps w:val=\\"11\\"/><w:hpsRaise w:val=\\"22\\"/><w:hpsBaseText w:val=\\"20\\"/></w:rubyPr><w:rt><w:r><w:rPr>"+size+"</w:rPr><w:t>"+escape(py)+"</w:t></w:r></w:rt><w:rubyBase><w:r><w:rPr>"+style(flags)+"</w:rPr><w:t>"+escape(s)+"</w:t></w:r></w:rubyBase></w:ruby>";
   }
   private static String pinyin(char c){
     try{
@@ -185,11 +261,13 @@ public class MainActivity extends Activity {
       body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>").append(run(String.valueOf(nums.get(page)))).append("</w:p>");
       String[] lines=pages.get(page).split("\\R",-1);
       for(String line:lines){
-        body.append("<w:p>");
+        body.append("<w:p><w:pPr><w:spacing w:before=\\"30\\" w:after=\\"30\\" w:line=\\"600\\" w:lineRule=\\"atLeast\\"/></w:pPr>");
+        int active=0;
         for(int i=0;i<line.length();i++){
           char c=line.charAt(i);
+          if(c=='\\uE000'&&i+1<line.length()){active=Math.max(0,Math.min(7,line.charAt(++i)-'0'));continue;}
           String py=pinyin(c);
-          body.append(py.isEmpty()?run(String.valueOf(c)):ruby(String.valueOf(c),py));
+          body.append(py.isEmpty()?run(String.valueOf(c),active):ruby(String.valueOf(c),py,active));
         }
         body.append("</w:p>");
       }
