@@ -52,7 +52,7 @@ final class MineruOcr implements AutoCloseable {
     float[] tensor=new float[w*h*3];
     for(int i=0;i<pixels.length;i++){
       int argb=pixels[i],r=Color.red(argb),g=Color.green(argb),b=Color.blue(argb);
-      float[] c={r/255.0f,g/255.0f,b/255.0f};
+      float[] c={b/255.0f,g/255.0f,r/255.0f};
       for(int ch=0;ch<3;ch++)
         tensor[ch*w*h+i]=detection?(c[ch]-MEAN[ch])/STD[ch]:(c[ch]-0.5f)/0.5f;
     }
