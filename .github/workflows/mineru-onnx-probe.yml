@@ -1,0 +1,40 @@
+name: MinerU ONNX Android feasibility probe
+on:
+  push:
+    branches: [chinese-ocr-android-build]
+    paths: ['.github/workflows/mineru-onnx-probe.yml']
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discover official MinerU 4 ONNX models
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.parse
+          url='https://huggingface.co/api/models/opendatalab/MinerU-4_models_onnx/tree/main?recursive=true'
+          req=urllib.request.Request(url,headers={'User-Agent':'MinerU-Android-Feasibility/1.0'})
+          with urllib.request.urlopen(req,timeout=90) as f: data=json.load(f)
+          matches=[{'path':x.get('path'),'size':x.get('size')} for x in data if x.get('path','').lower().endswith(('.onnx','.json','.txt','.yaml'))]
+          print('TOTAL_MATCHES',len(matches))
+          print(json.dumps(matches[:150],indent=2,ensure_ascii=False))
+          with open('/tmp/mineru-model-list.json','w') as f:json.dump(matches,f)
+          PY
+      - name: Check compatibility of ONNX Runtime Android package
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,zipfile,io
+          url='https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.30.0/onnxruntime-android-1.30.0.aar'
+          with urllib.request.urlopen(url,timeout=90) as resp: raw=resp.read()
+          with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            libs=[x for x in z.namelist() if x.startswith('jni/') and x.endswith('.so')]
+          print('ANDROID_RUNTIME_BYTES',len(raw))
+          print('NATIVE_ARCHITECTURES',libs)
+          assert any('arm64-v8a' in x for x in libs),'No arm64 runtime'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MinerU-Android-model-feasibility
+          path: /tmp/mineru-model-list.json
