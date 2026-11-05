@@ -164,7 +164,7 @@ public class MainActivity extends Activity {
               for(MineruOcr.Line line:lines){
                 WordStyles.Style style=estimateStyle(bmp,line.bounds);
                 recognized.append(WordStyles.begin(style)).append(line.text)
-                  .append(WordStyles.end()).append('\\n');
+                  .append(WordStyles.end()).append('\n');
               }
             }else{
               Text t=Tasks.await(mlkit.process(InputImage.fromBitmap(bmp,0)));
@@ -177,7 +177,7 @@ public class MainActivity extends Activity {
                     recognized.append(WordStyles.begin(style)).append(value)
                       .append(WordStyles.end()).append(' ');
                   }
-                  recognized.append('\\n');
+                  recognized.append('\n');
                 }
               }
             }
