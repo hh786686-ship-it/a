@@ -150,7 +150,8 @@ public class MainActivity extends Activity {
           PdfRenderer pdf=new PdfRenderer(fd);
           TextRecognizer mlkit=useMineruEngine?null:TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build())){
         for(int idx=0;idx<pdf.getPageCount();idx++){
-          status((useMineruEngine?"MinerU":"ML Kit")+" scanning page "+(idx+1)+" / "+pdf.getPageCount());
+          final int sourcePage=idx+1;
+          status((useMineruEngine?"MinerU":"ML Kit")+" scanning page "+sourcePage+" / "+pdf.getPageCount());
           try(PdfRenderer.Page page=pdf.openPage(idx)){
             float scale=Math.min(2.2f,2400f/Math.max(page.getWidth(),page.getHeight()));
             int w=Math.max(1,(int)(page.getWidth()*scale)),h=Math.max(1,(int)(page.getHeight()*scale));
@@ -159,7 +160,7 @@ public class MainActivity extends Activity {
             page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
             StringBuilder recognized=new StringBuilder();
             if(useMineruEngine){
-              ArrayList<MineruOcr.Line> lines=mineru.read(bmp,message->status("Page "+(idx+1)+": "+message));
+              ArrayList<MineruOcr.Line> lines=mineru.read(bmp,message->status("Page "+sourcePage+": "+message));
               for(MineruOcr.Line line:lines){
                 WordStyles.Style style=estimateStyle(bmp,line.bounds);
                 recognized.append(WordStyles.begin(style)).append(line.text)
