@@ -31,14 +31,14 @@ import java.util.zip.*;
 public class MainActivity extends Activity {
   private final ExecutorService worker=Executors.newSingleThreadExecutor();
   private Uri source; private File result;
-  private EditText range; private TextView message; private Button start,save;
+  private EditText range; private TextView message; private Button start,save; private CheckBox useMineru;
   private static final int OPEN=1,EXPORT=2;
   @Override public void onCreate(Bundle b) {
     super.onCreate(b);
     LinearLayout box=new LinearLayout(this);box.setOrientation(1);box.setPadding(26,30,26,24);
     ScrollView sc=new ScrollView(this);sc.addView(box);setContentView(sc);
     TextView title=new TextView(this);title.setText("Chinese OCR + Pinyin");title.setTextSize(25);box.addView(title);
-    TextView info=new TextView(this);info.setText("Offline PDF/DOCX converter • experimental. Editable DOCX text colour, underline and highlights are retained where stored directly on text runs. Scanned-PDF formatting is approximate.");box.addView(info);
+    TextView info=new TextView(this);info.setText("Offline PDF/DOCX OCR. MinerU 4 ONNX is available for PDF conversion (experimental). ML Kit remains optional. Scanned styles and OCR accuracy require verification.");box.addView(info);
     Button pick=new Button(this);pick.setText("Choose PDF or DOCX");box.addView(pick);
     pick.setOnClickListener(v->{ Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"});startActivityForResult(i,OPEN);});
     range=new EditText(this);range.setHint("Original pages e.g. 2-7 (blank = all)");range.setSingleLine(true);box.addView(range);
@@ -53,6 +53,10 @@ public class MainActivity extends Activity {
         finally{runOnUiThread(()->mineruTest.setEnabled(true));}
       });
     });
+    useMineru=new CheckBox(this);
+    useMineru.setText("Use MinerU 4 OCR for PDF (experimental; offline)");
+    useMineru.setChecked(true);
+    box.addView(useMineru);
     start=new Button(this);start.setText("Convert offline");start.setEnabled(false);box.addView(start);
     message=new TextView(this);message.setText("Select a document");message.setTextSize(15);box.addView(message);
     save=new Button(this);save.setText("Save editable Word file");save.setEnabled(false);box.addView(save);
@@ -106,13 +110,13 @@ public class MainActivity extends Activity {
   }
   private void convert() {
     if(source==null)return;start.setEnabled(false);save.setEnabled(false);
-    final Uri input=source;final String selection=range.getText().toString();
+    final Uri input=source;final String selection=range.getText().toString();final boolean mineru=useMineru.isChecked();
     worker.execute(()->{
       try{
         status("Loading document...");
         String mime=getContentResolver().getType(input);
         ArrayList<String> pages;
-        if("application/pdf".equals(mime)||looksLikePdf(input))pages=ocrPdf(input);
+        if("application/pdf".equals(mime)||looksLikePdf(input))pages=ocrPdf(input,mineru);
         else pages=extractDocx(input);
         ArrayList<Integer> selected=select(selection,pages.size());
         if(selected.isEmpty())throw new IOException("No pages in selected range");
@@ -126,46 +130,71 @@ public class MainActivity extends Activity {
     });
   }
   private boolean looksLikePdf(Uri uri){try(InputStream i=getContentResolver().openInputStream(uri)){byte[] b=new byte[5];return i!=null&&i.read(b)==5&&"%PDF-".equals(new String(b,StandardCharsets.US_ASCII));}catch(Exception e){return false;}}
-  private ArrayList<String> ocrPdf(Uri uri)throws Exception{
+  private ArrayList<String> ocrPdf(Uri uri,boolean useMineruEngine)throws Exception{
     File local=new File(getCacheDir(),"input.pdf");
     try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(local)){
       if(in==null)throw new IOException("Cannot open PDF");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);
     }
     ArrayList<String> texts=new ArrayList<>();
-    try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(local,ParcelFileDescriptor.MODE_READ_ONLY);
-        PdfRenderer pdf=new PdfRenderer(fd);
-        TextRecognizer recognizer=TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build())){
-      for(int idx=0;idx<pdf.getPageCount();idx++){
-        status("Scanning PDF page "+(idx+1)+" / "+pdf.getPageCount());
-        try(PdfRenderer.Page page=pdf.openPage(idx)){
-          float scale=Math.min(2.5f,2400f/Math.max(page.getWidth(),page.getHeight()));
-          int w=Math.max(1,(int)(page.getWidth()*scale)),h=Math.max(1,(int)(page.getHeight()*scale));
-          Bitmap bmp=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-          bmp.eraseColor(Color.WHITE);
-          page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-          Text t=Tasks.await(recognizer.process(InputImage.fromBitmap(bmp,0)));
-          StringBuilder recognized=new StringBuilder();
-          for(Text.TextBlock block:t.getTextBlocks()){
-            for(Text.Line line:block.getLines()){
-              // ML Kit character/element bounding boxes allow different words
-              // on the same line to keep different colours and underlines.
-              for(Text.Element element:line.getElements()){
-                String value=element.getText();
-                if(value==null||value.isEmpty())continue;
-                Rect bounds=element.getBoundingBox();
-                WordStyles.Style style=estimateStyle(bmp,bounds);
-                recognized.append(WordStyles.begin(style)).append(value).append(WordStyles.end());
-                recognized.append(' ');
+    File det=new File(getCacheDir(),"mineru-det.onnx");
+    File rec=new File(getCacheDir(),"mineru-rec.onnx");
+    MineruOcr mineru=null;
+    try{
+      if(useMineruEngine){
+        status("Loading MinerU 4 ONNX OCR models...");
+        copyModelIfNeeded("mineru-det.onnx",det);
+        copyModelIfNeeded("mineru-rec.onnx",rec);
+        mineru=new MineruOcr(det,rec,getAssets().open("ppocrv6_dict.txt"));
+      }
+      try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(local,ParcelFileDescriptor.MODE_READ_ONLY);
+          PdfRenderer pdf=new PdfRenderer(fd);
+          TextRecognizer mlkit=useMineruEngine?null:TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build())){
+        for(int idx=0;idx<pdf.getPageCount();idx++){
+          status((useMineruEngine?"MinerU":"ML Kit")+" scanning page "+(idx+1)+" / "+pdf.getPageCount());
+          try(PdfRenderer.Page page=pdf.openPage(idx)){
+            float scale=Math.min(2.2f,2400f/Math.max(page.getWidth(),page.getHeight()));
+            int w=Math.max(1,(int)(page.getWidth()*scale)),h=Math.max(1,(int)(page.getHeight()*scale));
+            Bitmap bmp=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
+            bmp.eraseColor(Color.WHITE);
+            page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            StringBuilder recognized=new StringBuilder();
+            if(useMineruEngine){
+              ArrayList<MineruOcr.Line> lines=mineru.read(bmp,message->status("Page "+(idx+1)+": "+message));
+              for(MineruOcr.Line line:lines){
+                WordStyles.Style style=estimateStyle(bmp,line.bounds);
+                recognized.append(WordStyles.begin(style)).append(line.text)
+                  .append(WordStyles.end()).append('\\n');
               }
-              recognized.append('\n');
+            }else{
+              Text t=Tasks.await(mlkit.process(InputImage.fromBitmap(bmp,0)));
+              for(Text.TextBlock block:t.getTextBlocks()){
+                for(Text.Line line:block.getLines()){
+                  for(Text.Element element:line.getElements()){
+                    String value=element.getText();
+                    if(value==null||value.isEmpty())continue;
+                    WordStyles.Style style=estimateStyle(bmp,element.getBoundingBox());
+                    recognized.append(WordStyles.begin(style)).append(value)
+                      .append(WordStyles.end()).append(' ');
+                  }
+                  recognized.append('\\n');
+                }
+              }
             }
+            texts.add(recognized.toString());
+            bmp.recycle();
           }
-          texts.add(recognized.toString());
-          bmp.recycle();
         }
       }
+    }finally{
+      if(mineru!=null)mineru.close();
     }
     return texts;
+  }
+  private void copyModelIfNeeded(String name,File dest)throws IOException{
+    if(dest.exists()&&dest.length()>1000000)return;
+    try(InputStream input=getAssets().open(name);OutputStream out=new FileOutputStream(dest)){
+      byte[] buf=new byte[65536];int n;while((n=input.read(buf))!=-1)out.write(buf,0,n);
+    }
   }
   // The pixel heuristic is shared with a pure-Java test harness.
   private WordStyles.Style estimateStyle(Bitmap bitmap,Rect rect){
