@@ -5,6 +5,8 @@ import android.os.Bundle;
 import android.content.*;
 import android.graphics.*;
 import android.graphics.Rect;
+import ai.onnxruntime.*;
+import java.nio.FloatBuffer;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
@@ -40,6 +42,17 @@ public class MainActivity extends Activity {
     Button pick=new Button(this);pick.setText("Choose PDF or DOCX");box.addView(pick);
     pick.setOnClickListener(v->{ Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"});startActivityForResult(i,OPEN);});
     range=new EditText(this);range.setHint("Original pages e.g. 2-7 (blank = all)");range.setSingleLine(true);box.addView(range);
+    Button mineruTest=new Button(this);
+    mineruTest.setText("Test MinerU OCR models (offline)");
+    box.addView(mineruTest);
+    mineruTest.setOnClickListener(v->{
+      mineruTest.setEnabled(false);
+      worker.execute(()->{
+        try{testMinerUModels();}
+        catch(Throwable e){status("MinerU model test failed: "+e.getClass().getSimpleName()+": "+e.getMessage());}
+        finally{runOnUiThread(()->mineruTest.setEnabled(true));}
+      });
+    });
     start=new Button(this);start.setText("Convert offline");start.setEnabled(false);box.addView(start);
     message=new TextView(this);message.setText("Select a document");message.setTextSize(15);box.addView(message);
     save=new Button(this);save.setText("Save editable Word file");save.setEnabled(false);box.addView(save);
@@ -56,6 +69,40 @@ public class MainActivity extends Activity {
         status("Saved editable DOCX");
       }catch(Exception e){status("Save error: "+e.getMessage());}
     }
+  }
+  // MinerU 4 PP-OCRv6 detector and recogniser are bundled from the official ONNX
+  // model bundle. This is a device inference feasibility test, not an OCR pipeline.
+  private void testMinerUModels()throws Exception{
+    String[] names={"mineru-det.onnx","mineru-rec.onnx"};
+    long[][] inputs={{1,3,256,256},{1,3,48,320}};
+    OrtEnvironment env=OrtEnvironment.getEnvironment();
+    StringBuilder report=new StringBuilder("MinerU 4 ONNX test:\\n");
+    for(int i=0;i<names.length;i++){
+      status("Testing MinerU "+(i==0?"text detector":"text recogniser")+"...");
+      File file=new File(getCacheDir(),names[i]);
+      if(!file.isFile()||file.length()==0){
+        try(InputStream src=getAssets().open(names[i]);OutputStream dst=new FileOutputStream(file)){
+          byte[] buf=new byte[32768];int n;
+          while((n=src.read(buf))!=-1)dst.write(buf,0,n);
+        }
+      }
+      long startMs=android.os.SystemClock.elapsedRealtime();
+      try(OrtSession.SessionOptions options=new OrtSession.SessionOptions()){
+        options.setIntraOpNumThreads(2);
+        try(OrtSession session=env.createSession(file.getAbsolutePath(),options)){
+          long[] shape=inputs[i]; int size=1;for(long v:shape)size*=v;
+          try(OnnxTensor input=OnnxTensor.createTensor(env,FloatBuffer.wrap(new float[size]),shape);
+              OrtSession.Result out=session.run(Collections.singletonMap("x",input))){
+            long elapsed=android.os.SystemClock.elapsedRealtime()-startMs;
+            report.append(i==0?"Detector":"Recogniser").append(": executed, ")
+              .append(elapsed).append(" ms, output count ")
+              .append(out.size()).append('\\n');
+          }
+        }
+      }
+    }
+    report.append("This tests model execution only. PDF conversion still uses ML Kit.");
+    status(report.toString());
   }
   private void convert() {
     if(source==null)return;start.setEnabled(false);save.setEnabled(false);
