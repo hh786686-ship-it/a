@@ -50,9 +50,15 @@ public final class PixelWordStyle {
     int first=Math.max(t+6,t+(int)(height*0.65));
     int last=Math.min(p.height()-1,b+6);
     for(int y=first;y<=last;y++){
-      int dark=0;
-      for(int x=l+2;x<r-2;x++)if(darkNeutral(p.argb(x,y)))dark++;
+      int dark=0,run=0,longest=0;
+      for(int x=l+2;x<r-2;x++){
+        if(darkNeutral(p.argb(x,y))){dark++;run++;longest=Math.max(longest,run);}
+        else run=0;
+      }
       double density=dark/(double)Math.max(1,width-4);
+      if(density<0.20)continue;
+      // Broken underlines may retain long dark horizontal segments.
+      if(longest>=Math.max(23,(int)(height*1.7)))return true;
       if(density<0.28)continue;
       // A sharp horizontal rule close to the baseline, not simply thick glyphs.
       int startRef=Math.max(t,y-8),endRef=Math.max(startRef+1,y-3);
