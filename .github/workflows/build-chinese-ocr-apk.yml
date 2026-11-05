@@ -33,6 +33,15 @@ jobs:
           echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           yes | "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" --licenses >/dev/null || true
           "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+      - name: Bundle original MinerU 4 PP-OCRv6 ONNX models
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ChineseOCR-Android/app/src/main/assets
+          curl -fL --retry 3 --max-time 180 -o ChineseOCR-Android/app/src/main/assets/mineru-det.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_tiny_det_infer.onnx
+          curl -fL --retry 3 --max-time 180 -o ChineseOCR-Android/app/src/main/assets/mineru-rec.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_small_rec_infer.onnx
+          test "$(stat -c%s ChineseOCR-Android/app/src/main/assets/mineru-det.onnx)" -gt 1700000
+          test "$(stat -c%s ChineseOCR-Android/app/src/main/assets/mineru-rec.onnx)" -gt 20000000
       - name: Compile offline debug APK
         working-directory: ChineseOCR-Android
         run: gradle --no-daemon :app:assembleDebug
