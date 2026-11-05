@@ -60,6 +60,13 @@ jobs:
           curl -fL --retry 3 --max-time 180 -o ChineseOCR-Android/app/src/main/assets/mineru-rec.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_small_rec_infer.onnx
           test "$(stat -c%s ChineseOCR-Android/app/src/main/assets/mineru-det.onnx)" -gt 1700000
           test "$(stat -c%s ChineseOCR-Android/app/src/main/assets/mineru-rec.onnx)" -gt 20000000
+          curl -fL --retry 3 --max-time 120 -o ChineseOCR-Android/app/src/main/assets/ppocrv6_dict.txt https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/ppocrv6_dict.txt
+          python3 - <<'PY'
+          p='ChineseOCR-Android/app/src/main/assets/ppocrv6_dict.txt'
+          with open(p,encoding='utf-8') as f: chars=f.read().splitlines()
+          assert len(chars)+2==18710, f'Vocabulary count mismatch: {len(chars)}'
+          print('PASS official recognition dictionary,',len(chars),'characters')
+          PY
       - name: Compile offline debug APK
         working-directory: ChineseOCR-Android
         run: gradle --no-daemon :app:assembleDebug
