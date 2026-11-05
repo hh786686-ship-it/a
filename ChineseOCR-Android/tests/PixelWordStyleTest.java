@@ -43,5 +43,24 @@ public final class PixelWordStyleTest {
     ok(!s.underline,"black non-underlined text not falsely underlined");
     ok("------".equals(s.color),"plain black text has no forced colour");
     ok("------".equals(s.highlight),"white background not falsely highlighted");
+
+    Canvas bold=new Canvas();
+    for(int x=25;x<120;x+=7)bold.box(x,16,x+4,38,0xFF000000);
+    s=PixelWordStyle.estimate(bold,20,14,125,40);
+    ok(s.bold,"thick scanned strokes classified bold");
+    ok(!s.underline,"bold glyph strokes do not become an underline");
+
+    Canvas thin=new Canvas();
+    for(int x=25;x<120;x+=7)thin.box(x,16,x+1,38,0xFF000000);
+    s=PixelWordStyle.estimate(thin,20,14,125,40);
+    ok(!s.bold,"thin scanned strokes remain normal weight");
+
+    Canvas pastelWatermark=new Canvas();
+    pastelWatermark.box(20,15,120,39,0xFFFFAAAA);
+    for(int x=25;x<115;x+=6)pastelWatermark.box(x,17,x+2,36,0xFF000000);
+    s=PixelWordStyle.estimate(pastelWatermark,20,15,120,39);
+    ok("------".equals(s.color),"light red watermark is not font colour");
+    ok("------".equals(s.highlight),"light red watermark is not highlighting");
+
   }
 }
