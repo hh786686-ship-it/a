@@ -62,5 +62,14 @@ public final class PixelWordStyleTest {
     ok("------".equals(s.color),"light red watermark is not font colour");
     ok("------".equals(s.highlight),"light red watermark is not highlighting");
 
+    Canvas darkCover=new Canvas();
+    darkCover.box(20,14,120,45,0xFF555555);
+    for(int x=25;x<115;x+=9)darkCover.box(x,18,x+3,40,0xFFFFFFFF);
+    s=PixelWordStyle.estimate(darkCover,20,14,120,45);
+    ok("FFFFFF".equals(s.color),"white cover lettering retains white font colour");
+    ok("505050".equals(s.highlight),"white cover lettering remains visible on dark shading");
+    ok(!s.bold,"dark cover background is not misclassified as bold text");
+
+
   }
 }
