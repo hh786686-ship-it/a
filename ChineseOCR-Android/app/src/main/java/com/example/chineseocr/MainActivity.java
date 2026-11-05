@@ -108,7 +108,7 @@ public class MainActivity extends Activity {
                 if(underlined(bmp,bounds))flags|=2;
                 if(yellowHighlight(bmp,bounds))flags|=4;
               }
-              recognized.append('\\uE000').append((char)('0'+flags)).append(value).append('\\uE000').append('0').append('\\n');
+              recognized.append('\uE000').append((char)('0'+flags)).append(value).append('\uE000').append('0').append('\n');
             }
           }
           texts.add(recognized.toString());
@@ -197,9 +197,9 @@ public class MainActivity extends Activity {
             }
           }
         }
-        current.append('\\uE000').append((char)('0'+flags));
+        current.append('\uE000').append((char)('0'+flags));
         for(int k=0;k<children.getLength();k++)if(!"rPr".equals(children.item(k).getLocalName()))appendDocxText(children.item(k),current,pages);
-        current.append('\\uE000').append('0');
+        current.append('\uE000').append('0');
         return;
       }
       if("t".equals(n)){current.append(node.getTextContent());return;}
@@ -230,17 +230,17 @@ public class MainActivity extends Activity {
   private static String style(int flags){
     StringBuilder b=new StringBuilder();
     if((flags&1)!=0)b.append("<w:b/>");
-    if((flags&2)!=0)b.append("<w:u w:val=\\"single\\"/>");
-    if((flags&4)!=0)b.append("<w:highlight w:val=\\"yellow\\"/>");
+    if((flags&2)!=0)b.append("<w:u w:val=\"single\"/>");
+    if((flags&4)!=0)b.append("<w:highlight w:val=\"yellow\"/>");
     return b.toString();
   }
   private static String run(String s){return run(s,0);}
   private static String run(String s,int flags){
-    return "<w:r><w:rPr>"+style(flags)+"</w:rPr><w:t xml:space=\\"preserve\\">"+escape(s)+"</w:t></w:r>";
+    return "<w:r><w:rPr>"+style(flags)+"</w:rPr><w:t xml:space=\"preserve\">"+escape(s)+"</w:t></w:r>";
   }
   private static String ruby(String s,String py,int flags){
-    String size="<w:sz w:val=\\"11\\"/>";
-    return "<w:ruby><w:rubyPr><w:rubyAlign w:val=\\"center\\"/><w:hps w:val=\\"11\\"/><w:hpsRaise w:val=\\"22\\"/><w:hpsBaseText w:val=\\"20\\"/></w:rubyPr><w:rt><w:r><w:rPr>"+size+"</w:rPr><w:t>"+escape(py)+"</w:t></w:r></w:rt><w:rubyBase><w:r><w:rPr>"+style(flags)+"</w:rPr><w:t>"+escape(s)+"</w:t></w:r></w:rubyBase></w:ruby>";
+    String size="<w:sz w:val=\"11\"/>";
+    return "<w:ruby><w:rubyPr><w:rubyAlign w:val=\"center\"/><w:hps w:val=\"11\"/><w:hpsRaise w:val=\"22\"/><w:hpsBaseText w:val=\"20\"/></w:rubyPr><w:rt><w:r><w:rPr>"+size+"</w:rPr><w:t>"+escape(py)+"</w:t></w:r></w:rt><w:rubyBase><w:r><w:rPr>"+style(flags)+"</w:rPr><w:t>"+escape(s)+"</w:t></w:r></w:rubyBase></w:ruby>";
   }
   private static String pinyin(char c){
     try{
@@ -261,11 +261,11 @@ public class MainActivity extends Activity {
       body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>").append(run(String.valueOf(nums.get(page)))).append("</w:p>");
       String[] lines=pages.get(page).split("\\R",-1);
       for(String line:lines){
-        body.append("<w:p><w:pPr><w:spacing w:before=\\"30\\" w:after=\\"30\\" w:line=\\"600\\" w:lineRule=\\"atLeast\\"/></w:pPr>");
+        body.append("<w:p><w:pPr><w:spacing w:before=\"30\" w:after=\"30\" w:line=\"600\" w:lineRule=\"atLeast\"/></w:pPr>");
         int active=0;
         for(int i=0;i<line.length();i++){
           char c=line.charAt(i);
-          if(c=='\\uE000'&&i+1<line.length()){active=Math.max(0,Math.min(7,line.charAt(++i)-'0'));continue;}
+          if(c=='\uE000'&&i+1<line.length()){active=Math.max(0,Math.min(7,line.charAt(++i)-'0'));continue;}
           String py=pinyin(c);
           body.append(py.isEmpty()?run(String.valueOf(c),active):ruby(String.valueOf(c),py,active));
         }
