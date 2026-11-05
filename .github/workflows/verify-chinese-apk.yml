@@ -1,0 +1,49 @@
+name: Verify built APK installation
+on:
+  push:
+    branches: [chinese-ocr-android-build]
+    paths: ['.github/workflows/verify-chinese-apk.yml']
+  workflow_dispatch:
+jobs:
+  verify-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download exact previously built v4 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ChineseOCRPinyin-GalaxyA16-APK
+          run-id: 42029534768
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: /tmp/test-apk
+      - name: Check binary package and integrity
+        run: |
+          set -euxo pipefail
+          test -s /tmp/test-apk/app-debug.apk
+          unzip -t /tmp/test-apk/app-debug.apk | tail -n 2
+          ls -l /tmp/test-apk/app-debug.apk
+      - name: Install Android platform tools and emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -eux
+            AAPT="$(find "${ANDROID_HOME}" -name aapt -type f | sort -V | tail -n 1)"
+            APKSIGNER="$(find "${ANDROID_HOME}" -name apksigner -type f | sort -V | tail -n 1)"
+            "$APKSIGNER" verify -v --print-certs /tmp/test-apk/app-debug.apk
+            "$AAPT" dump badging /tmp/test-apk/app-debug.apk | head -n 14
+            adb install -r /tmp/test-apk/app-debug.apk
+            adb shell pm path com.example.chineseocr
+            adb shell am start -W -n com.example.chineseocr/.MainActivity
+            sleep 6
+            adb logcat -d -s AndroidRuntime:E | tail -n 100
+            adb shell pidof com.example.chineseocr
+      - name: Report success
+        run: echo "APK passed Android package parsing, installation and launch"
