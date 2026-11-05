@@ -81,9 +81,9 @@ public final class PixelWordStyleTest {
     WordStyles.appendText(docx,encoded,c->"zhōng");
     String xml=docx.toString();
     ok(xml.contains("<w:b/>"),"scanned bold survives conversion to Word ruby XML");
-    ok(xml.contains("<w:u w:val=\\"single\\"/>"),"scanned underline survives conversion to Word ruby XML");
-    ok(xml.contains("<w:color w:val=\\"CC0A28\\"/>"),"scanned red ink survives conversion to Word ruby XML");
-    ok(xml.contains("w:fill=\\"FFFF00\\""),"scanned yellow highlight survives conversion to Word ruby XML");
+    ok(xml.contains("<w:u w:val=\"single\"/>"),"scanned underline survives conversion to Word ruby XML");
+    ok(xml.contains("<w:color w:val=\"CC0A28\"/>"),"scanned red ink survives conversion to Word ruby XML");
+    ok(xml.contains("w:fill=\"FFFF00\""),"scanned yellow highlight survives conversion to Word ruby XML");
 
 
 
