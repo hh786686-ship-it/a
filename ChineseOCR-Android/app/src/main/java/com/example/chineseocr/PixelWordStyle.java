@@ -59,7 +59,7 @@ public final class PixelWordStyle {
       if(x+1<r&&y+1<end&&darkNeutral(p.argb(x+1,y))
           &&darkNeutral(p.argb(x,y+1))&&darkNeutral(p.argb(x+1,y+1)))square++;
     }
-    return ink>=Math.max(24,width/7)&&square/(double)ink>0.45;
+    return ink>=Math.max(24,width/7)&&square/(double)ink>0.53;
   }
   private static boolean underline(Pixels p,int l,int t,int r,int b){
     int width=r-l,height=b-t;
