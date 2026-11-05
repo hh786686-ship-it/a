@@ -23,11 +23,28 @@ public final class PixelWordStyle {
     int left=Math.max(0,x1),right=Math.min(pixels.width(),x2);
     int top=Math.max(0,y1),bottom=Math.min(pixels.height(),y2);
     if(left>=right||top>=bottom)return WordStyles.Style.normal();
+    if(inverted(pixels,left,top,right,bottom)){
+      // Preserve white text from the dark PDF title page with contrast in Word.
+      return new WordStyles.Style(false,false,"FFFFFF","505050");
+    }
     boolean under=underline(pixels,left,top,right,bottom);
     boolean bold=bold(pixels,left,top,right,bottom);
     String color=ink(pixels,left,top,right,bottom);
     String highlight=background(pixels,left,top,right,bottom);
     return new WordStyles.Style(bold,under,color,highlight);
+  }
+  private static boolean inverted(Pixels p,int l,int t,int r,int b){
+    int dark=0,bright=0,total=0;
+    for(int y=t;y<b;y+=2)for(int x=l;x<r;x+=2){
+      int c=p.argb(x,y);
+      if(darkNeutral(c))dark++;
+      int red=red(c),green=green(c),blue=blue(c);
+      if(Math.min(red,Math.min(green,blue))>205&&
+         Math.max(red,Math.max(green,blue))-Math.min(red,Math.min(green,blue))<46)bright++;
+      total++;
+    }
+    return total>30&&dark/(double)total>0.68&&bright/(double)total>0.025
+      &&bright/(double)total<0.35;
   }
   private static boolean bold(Pixels p,int l,int t,int r,int b){
     // In the source scan bold ink has many adjacent 2x2 black blocks.
