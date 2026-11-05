@@ -167,64 +167,14 @@ public class MainActivity extends Activity {
     }
     return texts;
   }
-  // Pixel-based styling is a best-effort estimate and can confuse coloured
-  // watermarks, decoration, and thin CJK strokes with text formatting.
+  // The pixel heuristic is shared with a pure-Java test harness.
   private WordStyles.Style estimateStyle(Bitmap bitmap,Rect rect){
-    if(rect==null||rect.width()<1||rect.height()<1)return WordStyles.Style.normal();
-    boolean underline=underlined(bitmap,rect);
-    String ink=inkColor(bitmap,rect);
-    String highlight=highlightColor(bitmap,rect);
-    return new WordStyles.Style(false,underline,ink,highlight);
-  }
-  private boolean underlined(Bitmap bmp,Rect r){
-    int left=Math.max(0,r.left+2),right=Math.min(bmp.getWidth()-1,r.right-2);
-    if(right-left<9)return false;
-    // Check for a continuous dark line below the glyph baseline.
-    for(int y=Math.max(r.top+2,r.bottom-2);y<Math.min(bmp.getHeight(),r.bottom+6);y++){
-      int dark=0,total=0;
-      for(int x=left;x<=right;x++){
-        int c=bmp.getPixel(x,y);
-        int min=Math.min(Color.red(c),Math.min(Color.green(c),Color.blue(c)));
-        if(min<100)dark++;total++;
-      }
-      if(total>0&&(double)dark/total>0.78)return true;
-    }
-    return false;
-  }
-  private String inkColor(Bitmap bmp,Rect r){
-    int left=Math.max(0,r.left),right=Math.min(bmp.getWidth(),r.right);
-    int top=Math.max(0,r.top),bottom=Math.min(bmp.getHeight(),r.bottom);
-    long rs=0,gs=0,bs=0;int matched=0;
-    // Count saturated, dark-ish foreground pixels; ignore paper/background.
-    for(int y=top;y<bottom;y+=2)for(int x=left;x<right;x+=2){
-      int c=bmp.getPixel(x,y),red=Color.red(c),green=Color.green(c),blue=Color.blue(c);
-      int max=Math.max(red,Math.max(green,blue)),min=Math.min(red,Math.min(green,blue));
-      if(max-min>=65&&min<155&&max<245){
-        rs+=red;gs+=green;bs+=blue;matched++;
-      }
-    }
-    if(matched<Math.max(4,(right-left)*(bottom-top)/220))return null;
-    int red=(int)(rs/matched),green=(int)(gs/matched),blue=(int)(bs/matched);
-    return String.format(java.util.Locale.ROOT,"%02X%02X%02X",red,green,blue);
-  }
-  private String highlightColor(Bitmap bmp,Rect r){
-    int left=Math.max(0,r.left),right=Math.min(bmp.getWidth(),r.right);
-    int top=Math.max(0,r.top),bottom=Math.min(bmp.getHeight(),r.bottom);
-    int yellow=0,green=0,cyan=0,pink=0,samples=0;
-    for(int y=top;y<bottom;y+=3)for(int x=left;x<right;x+=3){
-      int c=bmp.getPixel(x,y),red=Color.red(c),g=Color.green(c),blue=Color.blue(c);
-      if(red>165&&g>165&&blue<Math.min(red,g)-40)yellow++;
-      else if(g>155&&red<g-35&&blue<g-25)green++;
-      else if(g>150&&blue>150&&red<Math.min(g,blue)-35)cyan++;
-      else if(red>155&&blue>125&&g<Math.min(red,blue)-45)pink++;
-      samples++;
-    }
-    int threshold=Math.max(5,(int)(samples*0.15));
-    if(yellow>threshold)return "FFFF00";
-    if(green>threshold)return "00FF00";
-    if(cyan>threshold)return "00FFFF";
-    if(pink>threshold)return "FF00FF";
-    return null;
+    if(rect==null)return WordStyles.Style.normal();
+    return PixelWordStyle.estimate(new PixelWordStyle.Pixels(){
+      public int width(){return bitmap.getWidth();}
+      public int height(){return bitmap.getHeight();}
+      public int argb(int x,int y){return bitmap.getPixel(x,y);}
+    },rect.left,rect.top,rect.right,rect.bottom);
   }
   private ArrayList<String> extractDocx(Uri uri)throws Exception{
     byte[] doc;
@@ -261,9 +211,15 @@ public class MainActivity extends Activity {
         WordStyles.Style style=WordStyles.fromRun(node);
         current.append(WordStyles.begin(style));
         NodeList children=node.getChildNodes();
-        for(int k=0;k<children.getLength();k++)
-          if(!"rPr".equals(children.item(k).getLocalName()))
-            appendDocxText(children.item(k),current,pages);
+        for(int k=0;k<children.getLength();k++){
+          Node part=children.item(k);
+          if("rPr".equals(part.getLocalName()))continue;
+          int oldPageCount=pages.size();
+          appendDocxText(part,current,pages);
+          // A page break can sit *inside* a styled run. Reopen that
+          // style on the following source page rather than dropping it.
+          if(pages.size()>oldPageCount)current.append(WordStyles.begin(style));
+        }
         current.append(WordStyles.end());
         return;
       }
