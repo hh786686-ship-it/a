@@ -76,7 +76,7 @@ public class MainActivity extends Activity {
     String[] names={"mineru-det.onnx","mineru-rec.onnx"};
     long[][] inputs={{1,3,256,256},{1,3,48,320}};
     OrtEnvironment env=OrtEnvironment.getEnvironment();
-    StringBuilder report=new StringBuilder("MinerU 4 ONNX test:\\n");
+    StringBuilder report=new StringBuilder("MinerU 4 ONNX test:\n");
     for(int i=0;i<names.length;i++){
       status("Testing MinerU "+(i==0?"text detector":"text recogniser")+"...");
       File file=new File(getCacheDir(),names[i]);
@@ -96,7 +96,7 @@ public class MainActivity extends Activity {
             long elapsed=android.os.SystemClock.elapsedRealtime()-startMs;
             report.append(i==0?"Detector":"Recogniser").append(": executed, ")
               .append(elapsed).append(" ms, output count ")
-              .append(out.size()).append('\\n');
+              .append(out.size()).append('\n');
           }
         }
       }
