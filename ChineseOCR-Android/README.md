@@ -1,0 +1,3 @@
+# Chinese OCR + Pinyin for Android — experimental build
+
+Android source, built on GitHub Actions for Samsung Galaxy A16 (Android 15). **Not the complete Windows v48 port.** Uses bundled ML Kit Chinese OCR, locally bundled pinyin4j, PDF/DOCX import, explicit DOCX page breaks, original page-range selection, editable DOCX export with ruby pinyin and original page numbers. No INTERNET permission. PDF formatting (bold, highlights, exact layout) and context-sensitive polyphonic pronunciations are not preserved. DOCX pagination without explicit breaks cannot be determined accurately. Always verify OCR output. Debug APK requires permission to install unknown apps, and is not Play Store signed.
