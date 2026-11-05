@@ -33,6 +33,23 @@ jobs:
           echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           yes | "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" --licenses >/dev/null || true
           "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+      - name: Run exported Word formatting regression tests
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/word-style-test
+          javac -encoding UTF-8 -d /tmp/word-style-test ChineseOCR-Android/app/src/main/java/com/example/chineseocr/WordStyles.java ChineseOCR-Android/tests/WordStylesTest.java
+          java -cp /tmp/word-style-test com.example.chineseocr.WordStylesTest /tmp/word-style-test/regression.docx
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          from xml.etree import ElementTree as ET
+          p='/tmp/word-style-test/regression.docx'
+          with ZipFile(p) as z:
+            assert z.testzip() is None
+            root=ET.fromstring(z.read('word/document.xml'))
+          ns={'w':'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+          assert len(root.findall('.//w:ruby',ns))==6
+          print('PASS ZIP integrity, valid Word XML and 6 ruby units')
+          PY
       - name: Bundle original MinerU 4 PP-OCRv6 ONNX models
         shell: bash
         run: |
