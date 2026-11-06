@@ -168,6 +168,18 @@ final class MineruOcr implements AutoCloseable {
     return smaller>0&&overlap/(double)smaller>=0.55;
   }
 
+  // Fast mode deliberately omits tiled rescanning and every style-analysis pass.
+  // Trade-off: small print may be less accurate than the thorough pipeline.
+  ArrayList<Line> readFast(Bitmap page)throws Exception {
+    ArrayList<Rect> regions=detect(page);
+    ArrayList<Line> output=new ArrayList<>();
+    for(Rect region:regions){
+      Line line=recognise(page,region);
+      if(line.text!=null&&!line.text.trim().isEmpty())output.add(line);
+    }
+    return output;
+  }
+
   ArrayList<Line> read(Bitmap page,Progress progress)throws Exception {
     ArrayList<Rect> regions=new ArrayList<>();
     int width=page.getWidth(),height=page.getHeight();
