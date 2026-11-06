@@ -59,13 +59,16 @@ public class MainActivity extends Activity {
       try{
         status("Loading document...");
         String mime=getContentResolver().getType(input);
-        ArrayList<String> pages;
-        if("application/pdf".equals(mime)||looksLikePdf(input))pages=ocrPdf(input,selection);
-        else pages=extractDocx(input);
-        ArrayList<Integer> selected=select(selection,pages.size());
-        if(selected.isEmpty())throw new IOException("No pages in selected range");
         ArrayList<String> texts=new ArrayList<>();
-        for(int i=0;i<selected.size();i++)texts.add(pages.get(selected.get(i)-1));
+        ArrayList<Integer> selected=new ArrayList<>();
+        if("application/pdf".equals(mime)||looksLikePdf(input)){
+          texts=ocrPdf(input,selection,selected);
+        }else{
+          ArrayList<String> pages=extractDocx(input);
+          selected=select(selection,pages.size());
+          for(int i:selected)texts.add(pages.get(i-1));
+        }
+        if(selected.isEmpty())throw new IOException("No pages in selected range");
         status("Building editable DOCX...");
         File f=new File(getCacheDir(),"Chinese_Pinyin_Converted.docx");
         makeDocx(f,selected,texts);
@@ -74,7 +77,7 @@ public class MainActivity extends Activity {
     });
   }
   private boolean looksLikePdf(Uri uri){try(InputStream i=getContentResolver().openInputStream(uri)){byte[] b=new byte[5];return i!=null&&i.read(b)==5&&"%PDF-".equals(new String(b,StandardCharsets.US_ASCII));}catch(Exception e){return false;}}
-  private ArrayList<String> ocrPdf(Uri uri,String selection)throws Exception{
+  private ArrayList<String> ocrPdf(Uri uri,String selection,ArrayList<Integer> selected)throws Exception{
     File local=new File(getCacheDir(),"input.pdf");
     try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(local)){
       if(in==null)throw new IOException("Cannot open PDF");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);
@@ -90,8 +93,8 @@ public class MainActivity extends Activity {
       mineru=new MineruOcr(det,rec,getAssets().open("ppocrv6_dict.txt"));
       try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(local,ParcelFileDescriptor.MODE_READ_ONLY);
           PdfRenderer pdf=new PdfRenderer(fd)){
-        ArrayList<Integer> chosen=select(selection,pdf.getPageCount());
-        for(int sourcePage:chosen){
+        selected.addAll(select(selection,pdf.getPageCount()));
+        for(int sourcePage:selected){
           int idx=sourcePage-1;
           status("MinerU scanning page "+sourcePage+" / "+pdf.getPageCount());
           try(PdfRenderer.Page page=pdf.openPage(idx)){
