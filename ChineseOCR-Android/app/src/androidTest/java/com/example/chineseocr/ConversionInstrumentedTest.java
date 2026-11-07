@@ -1,6 +1,7 @@
 package com.example.chineseocr;
 
 import android.app.Instrumentation;
+import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -21,12 +22,9 @@ import java.util.zip.*;
 public final class ConversionInstrumentedTest {
   private MainActivity activity(){
     Instrumentation instr=InstrumentationRegistry.getInstrumentation();
-    final MainActivity[] holder=new MainActivity[1];
-    instr.runOnMainSync(()->{
-      holder[0]=new MainActivity();
-      holder[0].attachBaseContext(instr.getTargetContext());
-    });
-    return holder[0];
+    Intent intent=new Intent(instr.getTargetContext(),MainActivity.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    return (MainActivity)instr.startActivitySync(intent);
   }
 
   static String unzip(File f,String name)throws Exception{
