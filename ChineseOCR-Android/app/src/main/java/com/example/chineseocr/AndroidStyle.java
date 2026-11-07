@@ -114,8 +114,12 @@ final class AndroidStyle {
     for(int y=r.top;y<r.bottom;y+=step)for(int x=r.left;x<r.right;x+=step){
       int c=bmp.getPixel(x,y),red=Color.red(c),green=Color.green(c),blue=Color.blue(c);
       int max=Math.max(red,Math.max(green,blue)),min=Math.min(red,Math.min(green,blue));
-      if(max<160){ink[0]+=red;ink[1]+=green;ink[2]+=blue;dark++;}
-      else if(max>170&&max-min>35&&min>85){bg[0]+=red;bg[1]+=green;bg[2]+=blue;bright++;}
+      int avg=(red+green+blue)/3;
+      boolean brightHighlight=(red>185&&green>185&&blue<185)
+        ||(max>175&&max-min>35&&min>85&&avg>165);
+      boolean inkPixel=max<150 ||(avg<160&&!brightHighlight);
+      if(inkPixel){ink[0]+=red;ink[1]+=green;ink[2]+=blue;dark++;}
+      else if(brightHighlight){bg[0]+=red;bg[1]+=green;bg[2]+=blue;bright++;}
     }
     if(dark>=3){
       int red=ink[0]/dark,green=ink[1]/dark,blue=ink[2]/dark;
