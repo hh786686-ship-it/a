@@ -7,8 +7,8 @@ android {
   applicationId = "com.example.livechinesea16"
   minSdk = 28
   targetSdk = 34
-  versionCode = 2
-  versionName = "1.1.0"
+  versionCode = 3
+  versionName = "1.2.0"
   ndk { abiFilters += listOf(providers.gradleProperty("smokeAbi").orElse("arm64-v8a").get()) }
  }
  compileOptions {

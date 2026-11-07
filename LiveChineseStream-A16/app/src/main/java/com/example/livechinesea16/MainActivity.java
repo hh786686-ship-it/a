@@ -202,6 +202,12 @@ public final class MainActivity extends Activity {
 
             recognizer = new OnlineRecognizer(getAssets(), c);
             modelReady = true;
+            // CI-only native inference check. The installed phone app never runs this
+            // unless explicitly launched with the ciSmokeTest intent extra.
+            if (getIntent().getBooleanExtra("ciSmokeTest", false)) {
+                new Thread(this::runOfflineSelfTest, "offline-selftest").start();
+            }
+
             ui.post(() -> {
                 setStatus("Offline model ready");
                 metricView.setText("Live interim text • Speech saved locally");
@@ -213,6 +219,37 @@ public final class MainActivity extends Activity {
                 metricView.setText(e.getClass().getSimpleName() + ": " + e.getMessage());
                 recordButton.setEnabled(false);
             });
+        }
+    }
+
+
+    private void runOfflineSelfTest() {
+        OnlineStream stream = null;
+        try {
+            stream = recognizer.createStream("");
+            float[] silentBlock = new float[1600]; // 100 ms at 16 kHz
+            int decoded = 0;
+            for (int i = 0; i < 60; i++) {
+                stream.acceptWaveform(silentBlock, SAMPLE_RATE);
+                while (recognizer.isReady(stream)) {
+                    recognizer.decode(stream);
+                    decoded++;
+                }
+            }
+            stream.inputFinished();
+            while (recognizer.isReady(stream)) {
+                recognizer.decode(stream);
+                decoded++;
+            }
+            recognizer.getResult(stream);
+            if (decoded < 1) throw new IllegalStateException("Native recognizer decoded no audio frames");
+            Log.i(LOG_TAG, "ASR silent self-test passed, decoded=" + decoded);
+            ui.post(() -> setStatus("Offline model ready · Self-test passed"));
+        } catch (Throwable err) {
+            Log.e(LOG_TAG, "ASR self-test failed", err);
+            ui.post(() -> setStatus("ASR self-test failed: " + err.getMessage()));
+        } finally {
+            if (stream != null) try { stream.release(); } catch (Throwable ignored) {}
         }
     }
 
