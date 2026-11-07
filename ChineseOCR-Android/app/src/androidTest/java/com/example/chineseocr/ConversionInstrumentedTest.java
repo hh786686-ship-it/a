@@ -3,6 +3,8 @@ package com.example.chineseocr;
 import android.app.Instrumentation;
 import android.content.Intent;
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.pdf.PdfDocument;
@@ -98,4 +100,22 @@ public final class ConversionInstrumentedTest {
     int[] dense=(int[])fit.invoke(null,String.join("",Collections.nCopies(2000,"你好")));
     assertEquals(7,dense[0]);assertEquals(4,dense[1]);
   }
+  @Test public void colouredTextOnYellowHighlightWithUnderline()throws Exception{
+    Bitmap bmp=Bitmap.createBitmap(310,130,Bitmap.Config.ARGB_8888);
+    Canvas c=new Canvas(bmp);c.drawColor(Color.WHITE);
+    Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+    p.setColor(Color.YELLOW);c.drawRect(20,30,260,91,p);
+    p.setColor(Color.rgb(220,25,25));p.setTextSize(40);
+    c.drawText("你好世界",27,78,p);
+    p.setColor(Color.BLACK);p.setStrokeWidth(2);
+    c.drawLine(25,92,250,92,p);
+    AndroidStyle.Mark mark=AndroidStyle.inspect(bmp,new Rect(20,30,260,94));
+    assertTrue("Expected red text; detected "+Integer.toHexString(mark.color),
+      Color.red(mark.color)>Color.green(mark.color)+35);
+    assertTrue("Expected yellow highlight; detected "+Integer.toHexString(mark.highlight),
+      mark.highlight!=Color.TRANSPARENT&&Color.red(mark.highlight)>180&&Color.green(mark.highlight)>170);
+    assertTrue("Expected underline",mark.underline);
+    bmp.recycle();
+  }
+
 }
