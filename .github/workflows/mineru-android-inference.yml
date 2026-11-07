@@ -1,0 +1,58 @@
+name: MinerU ONNX Android inference proof
+on:
+  push:
+    branches: [mineru-native-android-experimental]
+    paths:
+      - "ChineseOCR-Android/**"
+      - ".github/workflows/mineru-android-inference.yml"
+  workflow_dispatch:
+concurrency:
+  group: mineru-native-android-inference-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-model-inference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Install Android system image
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "emulator" "system-images;android-35;google_apis;x86_64"
+      - name: Obtain official MinerU detection and recognition models for test APK only
+        run: |
+          set -euo pipefail
+          mkdir -p ChineseOCR-Android/app/src/androidTest/assets
+          curl --retry 3 -fL --max-time 120 -o ChineseOCR-Android/app/src/androidTest/assets/mineru-det.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_tiny_det_infer.onnx
+          curl --retry 3 -fL --max-time 120 -o ChineseOCR-Android/app/src/androidTest/assets/mineru-rec.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_small_rec_infer.onnx
+          test "$(stat -c%s ChineseOCR-Android/app/src/androidTest/assets/mineru-det.onnx)" -ge 1700000
+          test "$(stat -c%s ChineseOCR-Android/app/src/androidTest/assets/mineru-rec.onnx)" -ge 21000000
+      - name: Enable KVM
+        run: sudo chown "${USER}" /dev/kvm
+      - name: Run real MinerU ONNX Android model inference
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          working-directory: ChineseOCR-Android
+          script: gradle --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.chineseocr.MineruOnnxAndroidSmokeTest
+      - name: Upload model inference test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinerU-Android-ONNX-test-results
+          path: |
+            ChineseOCR-Android/app/build/outputs/androidTest-results/connected/
+            ChineseOCR-Android/app/build/reports/androidTests/connected/
+          if-no-files-found: warn
