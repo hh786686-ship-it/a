@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -39,6 +40,7 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final int SAMPLE_RATE = 16000;
+    private static final String LOG_TAG = "LiveChineseA16";
     private static final int AUDIO_PERMISSION = 42;
     private static final int SAVE_DOCUMENT = 43;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -226,15 +228,17 @@ public final class MainActivity extends Activity {
         // Enough buffering to absorb occasional slow CPU inference on A16 5G.
         int capacity = Math.max(min * 2, SAMPLE_RATE * 2 * 3);
         try {
-            microphone = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            microphone = new AudioRecord(MediaRecorder.AudioSource.MIC,
                     SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, capacity);
             if (microphone.getState() != AudioRecord.STATE_INITIALIZED) {
                 microphone.release();
                 setStatus("Microphone initialization failed");
+                Log.e(LOG_TAG, "AudioRecord not initialized");
                 return;
             }
             microphone.startRecording();
+            Log.i(LOG_TAG, "AudioRecord state after start: " + microphone.getRecordingState());
             recording = true;
             busy = true;
             recordButton.setText("Stop and finish");
@@ -244,6 +248,7 @@ public final class MainActivity extends Activity {
             new Thread(() -> decodeLoop(current), "live-recognizer").start();
         } catch (Throwable e) {
             setStatus("Microphone error: " + e.getMessage());
+            Log.e(LOG_TAG, "Microphone startup exception", e);
             if (microphone != null) { try { microphone.release(); } catch (Throwable ignored) {} }
             microphone = null;
             recording = false;
@@ -306,6 +311,7 @@ public final class MainActivity extends Activity {
                 partial = "";
             }
         } catch (Throwable e) {
+            Log.e(LOG_TAG, "Recognition decoding failed", e);
             ui.post(() -> { setStatus("Recognition error: " + e.getMessage()); toast("Transcription stopped"); });
         } finally {
             try { audio.stop(); } catch (Throwable ignored) {}

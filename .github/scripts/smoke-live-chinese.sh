@@ -59,6 +59,7 @@ adb shell cat /sdcard/uidump.xml > /tmp/livechinese-recording.xml
 if ! grep -q 'Stop and finish' /tmp/livechinese-recording.xml; then
   echo 'Recording did not start successfully'
   cat /tmp/livechinese-recording.xml
+  adb logcat -d -v brief -s "LiveChineseA16:*" "AudioRecord:*" "AudioFlinger:*" "AndroidRuntime:*" | tail -200
   adb logcat -d -t 900 | tail -300
   exit 1
 fi
