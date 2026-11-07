@@ -4,7 +4,7 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.content.*;
 import android.graphics.*;
-import ai.onnxruntime.*;
+
 import java.nio.FloatBuffer;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
@@ -30,8 +30,8 @@ public class MainActivity extends Activity {
     super.onCreate(b);
     LinearLayout box=new LinearLayout(this);box.setOrientation(1);box.setPadding(26,30,26,24);
     ScrollView sc=new ScrollView(this);sc.addView(box);setContentView(sc);
-    TextView title=new TextView(this);title.setText("Chinese OCR + Pinyin");title.setTextSize(25);box.addView(title);
-    TextView info=new TextView(this);info.setText("Offline MinerU OCR for PDF; direct DOCX text reading. Editable Word with Chinese pinyin. No bold, colour, highlight, or underline detection.");
+    TextView title=new TextView(this);title.setText("Offline ML Kit OCR + Pinyin");title.setTextSize(25);box.addView(title);
+    TextView info=new TextView(this);info.setText("Offline ML Kit Chinese OCR (bundled model) for PDF; direct DOCX text reading. Editable Word with pinyin. Experimental: formatting/page-fitting not preserved.");
     Button pick=new Button(this);pick.setText("Choose PDF or DOCX");box.addView(pick);
     pick.setOnClickListener(v->{ Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"});startActivityForResult(i,OPEN);});
     range=new EditText(this);range.setHint("Original pages e.g. 2-7 (blank = all)");range.setSingleLine(true);box.addView(range);
@@ -77,53 +77,54 @@ public class MainActivity extends Activity {
     });
   }
   private boolean looksLikePdf(Uri uri){try(InputStream i=getContentResolver().openInputStream(uri)){byte[] b=new byte[5];return i!=null&&i.read(b)==5&&"%PDF-".equals(new String(b,StandardCharsets.US_ASCII));}catch(Exception e){return false;}}
-  private ArrayList<String> ocrPdf(Uri uri,String selection,ArrayList<Integer> selected)throws Exception{
+
+  /** Offline OCR: the bundled Google ML Kit Chinese recognizer runs on-device. */
+  private ArrayList<String> ocrPdf(Uri uri,String selection,ArrayList<Integer> selected)throws Exception {
     File local=new File(getCacheDir(),"input.pdf");
     try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(local)){
-      if(in==null)throw new IOException("Cannot open PDF");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);
+      if(in==null)throw new IOException("Cannot open PDF");
+      byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);
     }
     ArrayList<String> texts=new ArrayList<>();
-    File det=new File(getCacheDir(),"mineru-det.onnx");
-    File rec=new File(getCacheDir(),"mineru-rec.onnx");
-    MineruOcr mineru=null;
-    try{
-      status("Loading MinerU OCR...");
-      copyModelIfNeeded("mineru-det.onnx",det);
-      copyModelIfNeeded("mineru-rec.onnx",rec);
-      mineru=new MineruOcr(det,rec,getAssets().open("ppocrv6_dict.txt"));
+    com.google.mlkit.vision.text.TextRecognizer recognizer=
+       com.google.mlkit.vision.text.TextRecognition.getClient(
+          new com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions.Builder().build());
+    try {
       try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(local,ParcelFileDescriptor.MODE_READ_ONLY);
           PdfRenderer pdf=new PdfRenderer(fd)){
         selected.addAll(select(selection,pdf.getPageCount()));
         for(int sourcePage:selected){
-          int idx=sourcePage-1;
-          status("MinerU scanning page "+sourcePage+" / "+pdf.getPageCount());
-          try(PdfRenderer.Page page=pdf.openPage(idx)){
-            float scale=Math.min(1.65f,1550f/Math.max(page.getWidth(),page.getHeight()));
-            int w=Math.max(1,(int)(page.getWidth()*scale)),h=Math.max(1,(int)(page.getHeight()*scale));
+          status("Offline ML Kit OCR: page "+sourcePage+" / "+pdf.getPageCount());
+          try(PdfRenderer.Page page=pdf.openPage(sourcePage-1)){
+            float scale=Math.min(2.0f,1900f/Math.max(page.getWidth(),page.getHeight()));
+            int w=Math.max(1,Math.round(page.getWidth()*scale));
+            int h=Math.max(1,Math.round(page.getHeight()*scale));
             Bitmap bmp=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-            bmp.eraseColor(Color.WHITE);
-            page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-            StringBuilder recognized=new StringBuilder();
-            ArrayList<MineruOcr.Line> lines=mineru.readFast(bmp);
-            for(MineruOcr.Line line:lines){
-              if(line.text!=null&&!line.text.trim().isEmpty())
-                recognized.append(line.text).append('\n');
-            }
-            texts.add(recognized.toString());
-            bmp.recycle();
+            try{
+              bmp.eraseColor(Color.WHITE);
+              page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+              com.google.mlkit.vision.text.Text scan=
+                  com.google.android.gms.tasks.Tasks.await(
+                      recognizer.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp,0)));
+              ArrayList<com.google.mlkit.vision.text.Text.Line> lines=new ArrayList<>();
+              for(com.google.mlkit.vision.text.Text.TextBlock block:scan.getTextBlocks())
+                lines.addAll(block.getLines());
+              Collections.sort(lines,(a,b)->{
+                android.graphics.Rect ar=a.getBoundingBox(),br=b.getBoundingBox();
+                if(ar==null||br==null)return 0;
+                int d=ar.top-br.top;
+                return Math.abs(d)>Math.max(9,Math.min(ar.height(),br.height())/2)?d:ar.left-br.left;
+              });
+              StringBuilder recognized=new StringBuilder();
+              for(com.google.mlkit.vision.text.Text.Line line:lines)
+                if(!line.getText().trim().isEmpty())recognized.append(line.getText()).append('\n');
+              texts.add(recognized.toString());
+            }finally{bmp.recycle();}
           }
         }
       }
-    }finally{
-      if(mineru!=null)mineru.close();
-    }
+    }finally{recognizer.close();}
     return texts;
-  }
-  private void copyModelIfNeeded(String name,File dest)throws IOException{
-    if(dest.exists()&&dest.length()>1000000)return;
-    try(InputStream input=getAssets().open(name);OutputStream out=new FileOutputStream(dest)){
-      byte[] buf=new byte[65536];int n;while((n=input.read(buf))!=-1)out.write(buf,0,n);
-    }
   }
   private ArrayList<String> extractDocx(Uri uri)throws Exception{
     byte[] doc;
