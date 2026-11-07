@@ -69,6 +69,8 @@ public final class ConversionInstrumentedTest {
     assertTrue(xml.contains("<w:b/>"));assertTrue(xml.contains("<w:u w:val=\"single\"/>"));
     assertTrue(xml.contains("FF0000"));assertTrue(xml.contains("FFFF00"));
     assertTrue(xml.contains("<w:ruby>"));
+    assertTrue("third-tone ni must use caron",xml.contains("nǐ"));
+    assertTrue("third-tone hao must use caron",xml.contains("hǎo"));
     byte[] actualDocx=java.nio.file.Files.readAllBytes(output.toPath());
     assertTrue(actualDocx.length>250);
     assertEquals((byte)'P',actualDocx[0]);
