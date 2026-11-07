@@ -83,6 +83,26 @@ jobs:
           assert len(Document(pdfdoc).paragraphs) >= 2
           print("PASS: both emulator PDF OCR and DOCX-direct outputs are readable Word documents")
           PY
+      - name: Render actual Word exports and verify one-page fit
+        run: |
+          set -euo pipefail
+          if ! command -v libreoffice >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq libreoffice-writer poppler-utils
+          fi
+          mkdir -p /tmp/rendered-docx
+          libreoffice -env:UserInstallation=file:///tmp/lo-chinese-ocr-check --headless --convert-to pdf --outdir /tmp/rendered-docx ChineseOCR-Android/app/build/verified-docx/verified-style-output.docx
+          libreoffice -env:UserInstallation=file:///tmp/lo-chinese-ocr-check --headless --convert-to pdf --outdir /tmp/rendered-docx ChineseOCR-Android/app/build/verified-docx/verified-pdf-ocr-output.docx
+          python -m pip install --quiet pypdf
+          python - <<'PY'
+          from pypdf import PdfReader
+          for name in ("verified-style-output", "verified-pdf-ocr-output"):
+              path = "/tmp/rendered-docx/" + name + ".pdf"
+              reader = PdfReader(path)
+              assert len(reader.pages) == 1, f"{name}: output overflowed to {len(reader.pages)} pages"
+              assert reader.pages[0].mediabox.width > 500
+              print("PASS: rendered Word export", name, "fits one A4 page")
+          PY
       - name: Upload test reports even on failure
         if: always()
         uses: actions/upload-artifact@v4
