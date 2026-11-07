@@ -83,10 +83,13 @@ final class AndroidStyle {
       float median=sorted.get(sorted.size()/2);
       float low=sorted.get(Math.max(0,sorted.size()/4));
       float threshold=Math.max(median*1.34f,low*1.7f);
-      int k=0;
+      int k=0,searchFrom=0;
       for(Text.Element el:line.getElements()){
-        String t=el.getText();if(t==null)continue;
-        int at=text.indexOf(t);if(at<0)continue;
+        String t=el.getText();if(t==null||t.isEmpty())continue;
+        int at=text.indexOf(t,searchFrom);
+        if(at<0)at=text.indexOf(t);
+        if(at<0)continue;
+        searchFrom=at+t.length();
         for(int j=0;j<t.length()&&k<thick.size();j++,k++){
           boolean near=(k>0&&thick.get(k-1)>threshold*.87f)||(k+1<thick.size()&&thick.get(k+1)>threshold*.87f);
           if(at+j<output.size())output.get(at+j).bold=thick.get(k)>threshold&&near;
