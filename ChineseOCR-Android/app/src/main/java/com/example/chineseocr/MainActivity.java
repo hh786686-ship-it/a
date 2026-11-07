@@ -201,8 +201,14 @@ public class MainActivity extends Activity {
     }
     if(xml==null)throw new IOException("No word/document.xml in file");
     DocumentBuilderFactory f=DocumentBuilderFactory.newInstance();f.setNamespaceAware(true);
-    f.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);
-    Document d=f.newDocumentBuilder().parse(new ByteArrayInputStream(xml));
+    // Android's Harmony XML parser rejects the Apache disallow-doctype feature.
+    // Refuse DTD/ENTITY declarations explicitly instead of silently parsing them.
+    String safeXml=new String(xml,StandardCharsets.UTF_8);
+    if(safeXml.matches("(?is).*!\\s*DOCTYPE.*")||safeXml.matches("(?is).*!\\s*ENTITY.*"))
+      throw new IOException("DOCX XML contains prohibited DTD/entity declarations");
+    javax.xml.parsers.DocumentBuilder builder=f.newDocumentBuilder();
+    builder.setEntityResolver((publicId,systemId)->new org.xml.sax.InputSource(new java.io.StringReader("")));
+    Document d=builder.parse(new ByteArrayInputStream(xml));
     ArrayList<String> pages=new ArrayList<>();StringBuilder current=new StringBuilder();
     ArrayList<AndroidStyle.Mark> currentMarks=new ArrayList<>();
     NodeList paragraphs=d.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","p");
