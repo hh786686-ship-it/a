@@ -162,7 +162,10 @@ public class MainActivity extends Activity {
     for(com.google.mlkit.vision.text.Text.Line l:lines){
       android.graphics.Rect r=l.getBoundingBox();if(r!=null&&r.height()>1)heights.add(r.height());
     }
-    ArrayList<android.graphics.Rect> regions=new ArrayList<>();
+    ArrayList<android.graphics.Rect> known=new ArrayList<>();
+    for(com.google.mlkit.vision.text.Text.Line line:lines)
+      if(line.getBoundingBox()!=null)known.add(line.getBoundingBox());
+    ArrayList<android.graphics.Rect> regions=SmallTextRegions.uncovered(bmp,known,2);
     if(heights.size()<3)return regions;
     Collections.sort(heights);int typical=heights.get(heights.size()/2);
     ArrayList<android.graphics.Rect> candidates=new ArrayList<>();
@@ -182,7 +185,7 @@ public class MainActivity extends Activity {
         android.graphics.Rect inter=new android.graphics.Rect();
         if(inter.setIntersect(chosen,r)&&inter.width()*inter.height()>r.width()*r.height()*.5f){overlaps=true;break;}
       }
-      if(!overlaps)regions.add(r);
+      if(!overlaps&&regions.size()<2)regions.add(r);
       if(regions.size()>=2)break;
     }
     return regions;
