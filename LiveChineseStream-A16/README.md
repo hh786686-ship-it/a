@@ -1,6 +1,6 @@
 # Live Chinese Offline — Galaxy A16 5G
 
-An Android (ARM64) **true streaming** microphone transcription app. Free, private, no Google speech SDK and no internet permission. Mandarin, Cantonese, and English supported by one quantized streaming Paraformer ASR model via sherpa-onnx.
+An Android (ARM64) **true streaming** microphone transcription app. Free, private, no Google speech SDK and no internet permission. Mandarin and English supported by a quantized **bilingual** streaming Paraformer ASR model via sherpa-onnx. Cantonese was intentionally removed.
 
 ## Behaviour
 - Partials update during speech using 100 ms input blocks (subject to model context and phone compute speed).
@@ -14,7 +14,7 @@ An Android (ARM64) **true streaming** microphone transcription app. Free, privat
 Use GitHub Actions workflow `.github/workflows/build-live-chinese.yml` (push or manual workflow_dispatch). Debug APK is published under workflow run > Artifacts > `LiveChineseOffline-A16-APK`.
 
 The workflow downloads these official assets at build time (with SHA-256 checks for models):
-- https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-trilingual-zh-cantonese-en
+- https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en
 - https://github.com/k2-fsa/sherpa-onnx
 
 Building requires internet access, but **using the installed app does not**. Source code is not the APK. The application has not been benchmarked on a physical A16 5G. The 1–2 sec latency objective is a target rather than a verified guarantee.

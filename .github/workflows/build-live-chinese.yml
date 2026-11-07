@@ -24,29 +24,31 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Download and verify trilingual streaming int8 model
+      - name: Download and verify bilingual Mandarin-English streaming int8 model
         shell: bash
         run: |
           set -euo pipefail
-          base='https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-trilingual-zh-cantonese-en/resolve/main'
+          base='https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/main'
           mkdir -p LiveChineseStream-A16/app/src/main/assets/model
           cd LiveChineseStream-A16/app/src/main/assets/model
           for file in encoder.int8.onnx decoder.int8.onnx tokens.txt; do
             curl --fail --location --retry 5 --retry-delay 2 -o "$file" "${base}/${file}"
           done
-          echo '6047a644b41b236d9d8e89e3b94ef39d1b7037daab028131b722ca52e10b0357  encoder.int8.onnx' | sha256sum -c -
-          echo '545427acf508452b7d89969be082c8128c681e3432ff43aef09f6159f4b61a7e  decoder.int8.onnx' | sha256sum -c -
+          echo '81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a  encoder.int8.onnx' | sha256sum -c -
+          echo 'f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f  decoder.int8.onnx' | sha256sum -c -
           test $(wc -c < tokens.txt) -gt 50000
           file encoder.int8.onnx decoder.int8.onnx
           du -h *.onnx
       - name: Build debug APK
         working-directory: LiveChineseStream-A16
         run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Preserve ARM64 phone APK
+        run: cp LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/LiveChineseOffline-A16.apk"
       - name: Verify APK integrity and manifest
         shell: bash
         run: |
           set -euo pipefail
-          apk=LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
+          apk="$RUNNER_TEMP/LiveChineseOffline-A16.apk"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -18
           if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -q 'android.permission.INTERNET'; then
@@ -54,10 +56,36 @@ jobs:
             exit 1
           fi
           unzip -l "$apk" | grep -E 'assets/model/(encoder.int8.onnx|decoder.int8.onnx|tokens.txt)'
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           ls -lh "$apk"
+      - name: Build emulator x86_64 smoke-test APK
+        working-directory: LiveChineseStream-A16
+        run: |
+          gradle --no-daemon --stop || true
+          gradle --no-daemon -PsmokeAbi=x86_64 clean assembleDebug
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/x86_64/libsherpa-onnx-jni.so'
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Android emulator startup and microphone smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          heap-size: 768M
+          disk-size: 6G
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
+          script: bash .github/scripts/smoke-live-chinese.sh
+
       - uses: actions/upload-artifact@v4
         with:
           name: LiveChineseOffline-A16-APK
-          path: LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ runner.temp }}/LiveChineseOffline-A16.apk
           if-no-files-found: error
           retention-days: 30

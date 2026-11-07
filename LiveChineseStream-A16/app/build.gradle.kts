@@ -7,9 +7,9 @@ android {
   applicationId = "com.example.livechinesea16"
   minSdk = 28
   targetSdk = 34
-  versionCode = 1
-  versionName = "1.0.0"
-  ndk { abiFilters += listOf("arm64-v8a") }
+  versionCode = 2
+  versionName = "1.1.0"
+  ndk { abiFilters += listOf(providers.gradleProperty("smokeAbi").orElse("arm64-v8a").get()) }
  }
  compileOptions {
   sourceCompatibility = JavaVersion.VERSION_17
@@ -19,4 +19,8 @@ android {
  packaging { jniLibs { useLegacyPackaging = true } }
 }
 
-dependencies { implementation("com.github.k2-fsa:sherpa-onnx:v1.13.4") }
+dependencies {
+  implementation("com.github.k2-fsa:sherpa-onnx:v1.13.4")
+  // Required at runtime: the sherpa-onnx Java-facing API is written in Kotlin.
+  implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
+}

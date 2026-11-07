@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
 
         TextView title = label("Live Chinese", 29, Color.WHITE, true);
         root.addView(title);
-        TextView sub = label("100% offline • Mandarin / Cantonese / English", 13,
+        TextView sub = label("100% offline • Mandarin / English", 13,
                 Color.rgb(167, 187, 207), false);
         LinearLayout.LayoutParams subP = new LinearLayout.LayoutParams(-1, -2);
         subP.topMargin = dp(5);
