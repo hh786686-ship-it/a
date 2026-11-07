@@ -12,7 +12,7 @@ concurrency:
 jobs:
   android-model-inference:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -35,6 +35,14 @@ jobs:
           curl --retry 3 -fL --max-time 120 -o ChineseOCR-Android/app/src/androidTest/assets/mineru-rec.onnx https://huggingface.co/opendatalab/MinerU-4_models_onnx/resolve/main/OCR/paddleocr/ch_PP-OCRv6_small_rec_infer.onnx
           test "$(stat -c%s ChineseOCR-Android/app/src/androidTest/assets/mineru-det.onnx)" -ge 1700000
           test "$(stat -c%s ChineseOCR-Android/app/src/androidTest/assets/mineru-rec.onnx)" -ge 21000000
+      - name: Bundle MinerU OCR models and recognition dictionary in experimental APK
+        run: |
+          set -euo pipefail
+          mkdir -p ChineseOCR-Android/app/src/main/assets
+          cp ChineseOCR-Android/app/src/androidTest/assets/mineru-det.onnx ChineseOCR-Android/app/src/main/assets/mineru-det.onnx
+          cp ChineseOCR-Android/app/src/androidTest/assets/mineru-rec.onnx ChineseOCR-Android/app/src/main/assets/mineru-rec.onnx
+          curl --retry 3 -fL --max-time 120 -o ChineseOCR-Android/app/src/main/assets/ppocrv6_dict.txt https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/ppocrv6_dict.txt
+          test "$(wc -l < ChineseOCR-Android/app/src/main/assets/ppocrv6_dict.txt)" -ge 18708
       - name: Enable KVM
         run: sudo chown "${USER}" /dev/kvm
       - name: Run real MinerU ONNX Android model inference
@@ -46,7 +54,7 @@ jobs:
           profile: pixel_4
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: ChineseOCR-Android
-          script: gradle --no-daemon connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.chineseocr.MineruOnnxAndroidSmokeTest
+          script: gradle --no-daemon connectedDebugAndroidTest
       - name: Upload model inference test logs
         if: always()
         uses: actions/upload-artifact@v4
