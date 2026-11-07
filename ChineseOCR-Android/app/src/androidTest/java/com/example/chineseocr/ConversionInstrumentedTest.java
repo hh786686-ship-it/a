@@ -244,6 +244,100 @@ public final class ConversionInstrumentedTest {
     bmp.recycle();
   }
 
+
+  private static String hanOnly(String text) {
+    StringBuilder b=new StringBuilder();
+    for(int i=0;i<text.length();){
+      int cp=text.codePointAt(i);i+=Character.charCount(cp);
+      if(Character.UnicodeScript.of(cp)==Character.UnicodeScript.HAN)b.appendCodePoint(cp);
+    }
+    return b.toString();
+  }
+  private static int distance(String a,String b) {
+    int[] prev=new int[b.length()+1],cur=new int[b.length()+1];
+    for(int j=0;j<=b.length();j++)prev[j]=j;
+    for(int i=1;i<=a.length();i++) {
+      cur[0]=i;
+      for(int j=1;j<=b.length();j++)
+        cur[j]=Math.min(Math.min(cur[j-1]+1,prev[j]+1),
+          prev[j-1]+(a.charAt(i-1)==b.charAt(j-1)?0:1));
+      int[] swap=prev;prev=cur;cur=swap;
+    }
+    return prev[b.length()];
+  }
+  private static File makeBenchmarkPdf(File dest,String[] lines)throws Exception {
+    PdfDocument pdf=new PdfDocument();
+    PdfDocument.Page p=pdf.startPage(new PdfDocument.PageInfo.Builder(680,900,1).create());
+    Canvas c=p.getCanvas();c.drawColor(Color.WHITE);
+    Paint ink=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.SUBPIXEL_TEXT_FLAG);
+    ink.setColor(Color.BLACK);ink.setTextSize(44);
+    for(int i=0;i<lines.length;i++)c.drawText(lines[i],38,100+i*90,ink);
+    pdf.finishPage(p);
+    try(FileOutputStream o=new FileOutputStream(dest)){pdf.writeTo(o);}
+    pdf.close();return dest;
+  }
+
+  @Test public void twoDifferentChinesePdfsReach97PercentAndExportCorrectly()throws Exception {
+    MainActivity a=activity();
+    String[][] fixtures={
+      {"今天天气很好我们出门散步","大家一起学习中文知识","老师正在教学生读书","我们每天都要认真学习",
+       "这里有很多有趣故事","希望大家开心快乐成长","朋友之间互相帮助关心","今天我们练习写中国字"},
+      {"中国有很多美丽的城市","北京上海广州都是城市","图书馆里有许多好书","孩子们喜欢阅读故事",
+       "早上我们一起吃早餐","晚上大家回家休息睡觉","爸爸妈妈每天努力工作","我们喜欢春天的花朵"}
+    };
+    Method read=MainActivity.class.getDeclaredMethod("ocrPdf",Uri.class,String.class,ArrayList.class);
+    read.setAccessible(true);
+    Method export=MainActivity.class.getDeclaredMethod("makeDocx",File.class,ArrayList.class,ArrayList.class,ArrayList.class);
+    export.setAccessible(true);
+    Field markField=MainActivity.class.getDeclaredField("pageMarks");
+    markField.setAccessible(true);
+    for(int sample=0;sample<fixtures.length;sample++){
+      String expected=hanOnly(String.join("",fixtures[sample]));
+      File pdf=makeBenchmarkPdf(new File(a.getCacheDir(),"benchmark-"+(sample+1)+".pdf"),fixtures[sample]);
+      ArrayList<Integer> selected=new ArrayList<>();
+      @SuppressWarnings("unchecked") ArrayList<String> texts=(ArrayList<String>)read.invoke(a,Uri.fromFile(pdf),"1",selected);
+      assertEquals(1,texts.size());assertEquals(1,selected.size());
+      String actual=hanOnly(texts.get(0));
+      int errors=distance(expected,actual);
+      double accuracy=100.0*(1.0-(double)errors/expected.length());
+      android.util.Log.i("OCR_BENCHMARK","PDF "+(sample+1)+" chars="+expected.length()+
+        " errors="+errors+" accuracy="+String.format(Locale.US,"%.2f",accuracy)+"%"+
+        " expected="+expected+" actual="+actual);
+      assertTrue("PDF "+(sample+1)+" below 97% accuracy: "+accuracy+
+        " expected="+expected+" actual="+actual,accuracy>=97.0);
+      @SuppressWarnings("unchecked")
+      ArrayList<ArrayList<AndroidStyle.Mark>> marks=
+        (ArrayList<ArrayList<AndroidStyle.Mark>>)markField.get(a);
+      File docx=new File(a.getCacheDir(),"benchmark-"+(sample+1)+".docx");
+      export.invoke(a,docx,selected,texts,marks);
+      assertTrue(docx.exists()&&docx.length()>400);
+      String xml=unzip(docx,"word/document.xml");
+      javax.xml.parsers.DocumentBuilderFactory factory=javax.xml.parsers.DocumentBuilderFactory.newInstance();
+      factory.setNamespaceAware(true);
+      org.w3c.dom.Document parsed=factory.newDocumentBuilder().parse(
+        new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+      String ns="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+      org.w3c.dom.NodeList bases=parsed.getElementsByTagNameNS(ns,"rubyBase");
+      StringBuilder recovered=new StringBuilder();
+      for(int i=0;i<bases.getLength();i++){
+        org.w3c.dom.NodeList children=bases.item(i).getChildNodes();
+        for(int j=0;j<children.getLength();j++)
+          recovered.append(children.item(j).getTextContent());
+      }
+      assertEquals("Word output lost OCR Chinese characters",actual,hanOnly(recovered.toString()));
+      android.content.ContentValues cv=new android.content.ContentValues();
+      cv.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"benchmark-"+(sample+1)+"-output.docx");
+      cv.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      cv.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/");
+      Uri dst=a.getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,cv);
+      assertNotNull(dst);
+      try(InputStream src=new FileInputStream(docx);OutputStream out=a.getContentResolver().openOutputStream(dst)){
+        assertNotNull(out);byte[] bytes=new byte[8192];int n;
+        while((n=src.read(bytes))!=-1)out.write(bytes,0,n);
+      }
+    }
+  }
   @Test public void exportedDocxHandlesUnicodeAndEscaping()throws Exception{
     MainActivity a=activity();
     File output=new File(a.getCacheDir(),"unicode-output.docx");
