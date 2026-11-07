@@ -1,7 +1,7 @@
 name: MinerU ONNX Android feasibility probe
 on:
   push:
-    branches: [chinese-ocr-android-build]
+    branches: [mineru-native-android-experimental]
     paths: ['.github/workflows/mineru-onnx-probe.yml']
   workflow_dispatch:
 jobs:
@@ -51,6 +51,10 @@ jobs:
           print('NATIVE_ARCHITECTURES',libs)
           assert any('arm64-v8a' in x for x in libs),'No arm64 runtime'
           PY
+      - name: Summarize Android MinerU deployment limitations
+        run: |
+          echo "ONNX session tests only demonstrate model loadability on Linux CPU." >> "$GITHUB_STEP_SUMMARY"
+          echo "They do not constitute a complete MinerU Android OCR pipeline or Android inference benchmark." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: MinerU-Android-model-feasibility
