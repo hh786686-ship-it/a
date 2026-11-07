@@ -61,9 +61,17 @@ final class MineruOnnxOcr implements AutoCloseable {
     int area=width*height;
     for(int i=0;i<area;i++){
       int color=colors[i];
-      tensor[i]=((Color.blue(color)/255f)-.5f)/.5f;
-      tensor[area+i]=((Color.green(color)/255f)-.5f)/.5f;
-      tensor[2*area+i]=((Color.red(color)/255f)-.5f)/.5f;
+      float blue=Color.blue(color)/255f,green=Color.green(color)/255f,red=Color.red(color)/255f;
+      if(recognition){
+        tensor[i]=(blue-.5f)/.5f;
+        tensor[area+i]=(green-.5f)/.5f;
+        tensor[2*area+i]=(red-.5f)/.5f;
+      }else{
+        // Official PP-OCRv6 Tiny detection model preprocessing: BGR ImageNet stats.
+        tensor[i]=(blue-.485f)/.229f;
+        tensor[area+i]=(green-.456f)/.224f;
+        tensor[2*area+i]=(red-.406f)/.225f;
+      }
     }
     if(scaled!=bmp)scaled.recycle();
     return tensor;
