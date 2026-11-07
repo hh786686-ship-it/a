@@ -171,6 +171,21 @@ public final class ConversionInstrumentedTest {
       assertTrue("Missing contextual pinyin "+py,xml.contains(py));
   }
 
+  @Test public void pixelRecoveryFindsUnrecognizedSmallHeader()throws Exception{
+    Bitmap bmp=Bitmap.createBitmap(500,300,Bitmap.Config.ARGB_8888);
+    Canvas canvas=new Canvas(bmp);canvas.drawColor(Color.WHITE);
+    Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setColor(Color.BLACK);p.setTextSize(20);
+    canvas.drawText("小字标题",35,37,p);
+    p.setTextSize(42);canvas.drawText("你好世界",35,175,p);
+    ArrayList<Rect> recognized=new ArrayList<>();
+    recognized.add(new Rect(30,127,240,190));
+    ArrayList<Rect> recovery=SmallTextRegions.uncovered(bmp,recognized,2);
+    assertTrue("Missed header was not considered for rescan: "+recovery,!recovery.isEmpty());
+    assertTrue("Expected uncovered header near page top: "+recovery,recovery.get(0).top<50);
+    assertTrue(recovery.size()<=2);
+    bmp.recycle();
+  }
+
   @Test public void fontFittingHasOnlyElevenNineSeven()throws Exception{
     Method fit=MainActivity.class.getDeclaredMethod("fit",String.class);fit.setAccessible(true);
     int[] result=(int[])fit.invoke(null,"你好");
