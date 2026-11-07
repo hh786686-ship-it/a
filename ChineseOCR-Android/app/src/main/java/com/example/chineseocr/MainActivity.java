@@ -310,6 +310,11 @@ public class MainActivity extends Activity {
       format.setVCharType(HanyuPinyinVCharType.WITH_U_UNICODE);
       String[] p=PinyinHelper.toHanyuPinyinStringArray(c,format);
       String value=p!=null&&p.length>0?p[0]:"";
+      // pinyin4j may emit breve accents for third tone; Hanyu Pinyin uses carons.
+      value=value.replace('ă','ǎ').replace('ĕ','ě').replace('ĭ','ǐ')
+                 .replace('ŏ','ǒ').replace('ŭ','ǔ')
+                 .replace('Ă','Ǎ').replace('Ĕ','Ě').replace('Ĭ','Ǐ')
+                 .replace('Ŏ','Ǒ').replace('Ŭ','Ǔ');
       CACHE.put(c,value);return value;
     }catch(Exception ex){return "";}
   }
