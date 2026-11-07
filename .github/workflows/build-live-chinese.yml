@@ -5,6 +5,7 @@ on:
     paths:
       - 'LiveChineseStream-A16/**'
       - '.github/workflows/build-live-chinese.yml'
+      - '.github/scripts/smoke-live-chinese.sh'
 
 jobs:
   android:
