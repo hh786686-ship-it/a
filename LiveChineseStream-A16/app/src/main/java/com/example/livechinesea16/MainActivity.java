@@ -36,7 +36,11 @@ import com.k2fsa.sherpa.onnx.OnlineStream;
 
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 
 public final class MainActivity extends Activity {
     private static final int SAMPLE_RATE = 16000;
@@ -55,7 +59,10 @@ public final class MainActivity extends Activity {
     private TextView metricView;
     private Button recordButton;
     private ScrollView transcriptScroller;
-    private String committed = "";
+    private final ArrayList<TranscriptSegment> committedSegments = new ArrayList<>();
+    private final ExecutorService correctionExecutor = Executors.newSingleThreadExecutor();
+    private volatile AccuracyEngine accuracyEngine;
+    private int transcriptGeneration = 0;
     private String partial = "";
     private long lastUiMs = 0L;
 
@@ -166,7 +173,7 @@ public final class MainActivity extends Activity {
             startActivityForResult(i, SAVE_DOCUMENT);
         });
         clear.setOnClickListener(v -> {
-            synchronized (transcriptLock) { committed = ""; partial = ""; }
+            synchronized (transcriptLock) { committedSegments.clear(); partial = ""; transcriptGeneration++; }
             drawTranscript();
         });
 
@@ -201,6 +208,8 @@ public final class MainActivity extends Activity {
             c.setEnableEndpoint(true);
 
             recognizer = new OnlineRecognizer(getAssets(), c);
+            ui.post(() -> setStatus("Live model loaded • Initializing accuracy and punctuation…"));
+            accuracyEngine = new AccuracyEngine(this);
             modelReady = true;
             // CI-only native inference check. The installed phone app never runs this
             // unless explicitly launched with the ciSmokeTest intent extra.
@@ -210,7 +219,7 @@ public final class MainActivity extends Activity {
 
             ui.post(() -> {
                 setStatus("Offline model ready");
-                metricView.setText("Live interim text • Speech saved locally");
+                metricView.setText("Two-pass accuracy correction • Automatic ， and 。");
                 recordButton.setEnabled(true);
             });
         } catch (Throwable e) {
@@ -242,6 +251,11 @@ public final class MainActivity extends Activity {
                 decoded++;
             }
             recognizer.getResult(stream);
+            // Exercise real SenseVoice inference and neural punctuation in CI.
+            String checked = accuracyEngine.recognize(new float[32000]);
+            String sentences = accuracyEngine.restorePunctuation("今天我去学校明天我回家");
+            if (!sentences.contains("。")) throw new IllegalStateException("Punctuation produced no full stop: " + sentences);
+            Log.i(LOG_TAG, "Second-pass and punctuation self-test OK; sample=" + sentences + ", speech=" + checked);
             if (decoded < 1) throw new IllegalStateException("Native recognizer decoded no audio frames");
             Log.i(LOG_TAG, "ASR silent self-test passed, decoded=" + decoded);
             ui.post(() -> setStatus("Offline model ready · Self-test passed"));
@@ -302,6 +316,7 @@ public final class MainActivity extends Activity {
 
     private void decodeLoop(AudioRecord audio) {
         OnlineStream stream = null;
+        FloatCollector captured = new FloatCollector();
         try {
             stream = recognizer.createStream("");
             short[] pcm16 = new short[1600]; // 100 ms chunks
@@ -311,6 +326,7 @@ public final class MainActivity extends Activity {
                 if (size <= 0) continue;
                 float[] pcm = new float[size];
                 for (int i = 0; i < size; i++) pcm[i] = pcm16[i] / 32768.0f;
+                captured.add(pcm);
                 long begin = SystemClock.elapsedRealtime();
                 stream.acceptWaveform(pcm, SAMPLE_RATE);
                 while (recognizer.isReady(stream)) recognizer.decode(stream);
@@ -321,10 +337,7 @@ public final class MainActivity extends Activity {
                     stream.acceptWaveform(new float[SAMPLE_RATE / 2], SAMPLE_RATE);
                     while (recognizer.isReady(stream)) recognizer.decode(stream);
                     current = recognizer.getResult(stream).getText().trim();
-                    synchronized (transcriptLock) {
-                        appendCommitted(current);
-                        partial = "";
-                    }
+                    queueCorrection(current, captured.drain());
                     recognizer.reset(stream);
                 } else {
                     synchronized (transcriptLock) { partial = current; }
@@ -343,10 +356,7 @@ public final class MainActivity extends Activity {
             stream.inputFinished();
             while (recognizer.isReady(stream)) recognizer.decode(stream);
             String tail = recognizer.getResult(stream).getText().trim();
-            synchronized (transcriptLock) {
-                appendCommitted(tail);
-                partial = "";
-            }
+            queueCorrection(tail, captured.drain());
         } catch (Throwable e) {
             Log.e(LOG_TAG, "Recognition decoding failed", e);
             ui.post(() -> { setStatus("Recognition error: " + e.getMessage()); toast("Transcription stopped"); });
@@ -366,17 +376,78 @@ public final class MainActivity extends Activity {
         }
     }
 
-    // Must be called with transcriptLock.
-    private void appendCommitted(String s) {
-        if (s == null || s.isEmpty()) return;
-        committed = committed.isEmpty() ? s : committed + "\n" + s;
+    private static final class TranscriptSegment {
+        String text;
+        TranscriptSegment(String text) { this.text = text; }
+    }
+
+    private static final class FloatCollector {
+        private float[] data = new float[SAMPLE_RATE * 2];
+        private int length = 0;
+        void add(float[] samples) {
+            if (length + samples.length > SAMPLE_RATE * 20) {
+                // Bound memory even if an endpoint is missed.
+                length = 0;
+            }
+            while (length + samples.length > data.length)
+                data = Arrays.copyOf(data, Math.min(data.length * 2, SAMPLE_RATE * 21));
+            System.arraycopy(samples, 0, data, length, samples.length);
+            length += samples.length;
+        }
+        float[] drain() {
+            float[] result = Arrays.copyOf(data, length);
+            length = 0;
+            return result;
+        }
+    }
+
+    private void queueCorrection(String firstPass, float[] speech) {
+        final TranscriptSegment slot;
+        final int generation;
+        synchronized (transcriptLock) {
+            String draft = AccuracyEngine.ensureSentenceEnd(firstPass);
+            if (draft.isEmpty()) {
+                partial = "";
+                return;
+            }
+            slot = new TranscriptSegment(draft);
+            committedSegments.add(slot);
+            partial = "";
+            generation = transcriptGeneration;
+        }
+        ui.post(this::drawTranscript);
+        if (speech == null || speech.length < 3200) return;
+        correctionExecutor.execute(() -> {
+            try {
+                // Offline SenseVoice sees the whole short utterance and can repair
+                // recognition errors made by the low-latency streaming model.
+                String secondPass = accuracyEngine.recognize(speech);
+                if (!secondPass.isEmpty()) {
+                    synchronized (transcriptLock) {
+                        if (generation != transcriptGeneration || !committedSegments.contains(slot)) return;
+                        slot.text = secondPass;
+                    }
+                    ui.post(this::drawTranscript);
+                }
+            } catch (Throwable err) {
+                Log.e(LOG_TAG, "Second-pass correction failed; retaining streaming text", err);
+            }
+        });
     }
 
     private String transcript() {
         synchronized (transcriptLock) {
-            if (committed.isEmpty()) return partial;
-            if (partial.isEmpty()) return committed;
-            return committed + "\n" + partial;
+            StringBuilder text = new StringBuilder();
+            for (TranscriptSegment segment : committedSegments) {
+                if (segment.text.isEmpty()) continue;
+                if (text.length() > 0) text.append("\\n");
+                text.append(segment.text);
+            }
+            if (!partial.isEmpty()) {
+                if (text.length() > 0) text.append("\\n");
+                text.append(partial);
+            }
+            return text.toString();
         }
     }
 

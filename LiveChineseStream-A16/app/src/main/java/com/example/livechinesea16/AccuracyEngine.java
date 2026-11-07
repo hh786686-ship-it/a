@@ -1,0 +1,97 @@
+package com.example.livechinesea16;
+
+import android.content.Context;
+
+import com.k2fsa.sherpa.onnx.FeatureConfig;
+import com.k2fsa.sherpa.onnx.OfflineModelConfig;
+import com.k2fsa.sherpa.onnx.OfflineRecognizer;
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig;
+import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig;
+import com.k2fsa.sherpa.onnx.OfflineStream;
+import com.k2fsa.sherpa.onnx.OfflinePunctuation;
+import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig;
+import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig;
+
+import java.util.regex.Pattern;
+
+/**
+ * Second-pass speech recognizer and sentence punctuation.
+ * Called only from the single background correction thread.
+ * Both models are installed in the APK; no network/API is used.
+ */
+public final class AccuracyEngine {
+    private final OfflineRecognizer offline;
+    private final OfflinePunctuation punctuator;
+    private static final Pattern TAGS = Pattern.compile("<\\|[^|>]+\\|>");
+    private static final Pattern CJK = Pattern.compile("[\\p{IsHan}]");
+    private static final Pattern TRAILING_MARKS = Pattern.compile("[。！？.!?]+$");
+
+    public AccuracyEngine(Context context) {
+        OfflineSenseVoiceModelConfig sv = new OfflineSenseVoiceModelConfig();
+        sv.setModel("secondpass/model.int8.onnx");
+        // Empty language means automatic Mandarin / English selection.
+        sv.setLanguage("");
+        sv.setUseInverseTextNormalization(true);
+        OfflineModelConfig m = new OfflineModelConfig();
+        m.setSenseVoice(sv);
+        m.setTokens("secondpass/tokens.txt");
+        m.setNumThreads(2);
+        m.setProvider("cpu");
+        OfflineRecognizerConfig config = new OfflineRecognizerConfig();
+        config.setFeatConfig(new FeatureConfig(16000, 80, 0.0f));
+        config.setModelConfig(m);
+        offline = new OfflineRecognizer(context.getAssets(), config);
+
+        OfflinePunctuationModelConfig pm = new OfflinePunctuationModelConfig();
+        pm.setCtTransformer("punctuation/model.int8.onnx");
+        pm.setNumThreads(1);
+        pm.setProvider("cpu");
+        OfflinePunctuationConfig pc = new OfflinePunctuationConfig(pm);
+        punctuator = new OfflinePunctuation(context.getAssets(), pc);
+    }
+
+    public String recognize(float[] samples) {
+        if (samples == null || samples.length < 1600) return "";
+        OfflineStream stream = offline.createStream();
+        try {
+            stream.acceptWaveform(samples, 16000);
+            offline.decode(stream);
+            return restorePunctuation(offline.getResult(stream).getText());
+        } finally {
+            stream.release();
+        }
+    }
+
+    public String restorePunctuation(String text) {
+        String cleaned = sanitize(text);
+        if (cleaned.isEmpty()) return "";
+        String result = punctuator.addPunctuation(cleaned);
+        return ensureSentenceEnd(sanitize(result == null || result.trim().isEmpty() ? cleaned : result));
+    }
+
+    static String sanitize(String text) {
+        if (text == null) return "";
+        String s = TAGS.matcher(text).replaceAll("");
+        // Collapse whitespace without merging normal English words.
+        s = s.replaceAll("\\s+", " ").trim();
+        // Restore normal Chinese spacing.
+        s = s.replaceAll("(?<=[\\p{IsHan}，。！？、]) +(?=[\\p{IsHan}，。！？、])", "");
+        s = s.replaceAll(" +([，。！？、])", "$1");
+        return s;
+    }
+
+    public static String ensureSentenceEnd(String text) {
+        String s = sanitize(text);
+        if (s.isEmpty()) return "";
+        // Preserve natural question/exclamation marks and English periods.
+        if (TRAILING_MARKS.matcher(s).find()) return s;
+        // User requested Chinese full stops between sentences.
+        if (CJK.matcher(s).find()) return s + "。";
+        return s + ".";
+    }
+
+    public void release() {
+        punctuator.release();
+        offline.release();
+    }
+}
