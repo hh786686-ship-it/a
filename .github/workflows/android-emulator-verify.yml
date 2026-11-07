@@ -40,6 +40,37 @@ jobs:
             mkdir -p app/build/verified-docx
             adb pull /sdcard/Download/mlkit-verified-style-output.docx app/build/verified-docx/verified-style-output.docx
             test -s app/build/verified-docx/verified-style-output.docx
+      - name: Independently validate exported Word document
+        run: |
+          python -m pip install --quiet python-docx
+          python - <<'PY'
+          import zipfile
+          import xml.etree.ElementTree as ET
+          from docx import Document
+          p = "ChineseOCR-Android/app/build/verified-docx/verified-style-output.docx"
+          W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None, "Corrupt DOCX archive"
+              names = set(z.namelist())
+              assert {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= names
+              root = ET.fromstring(z.read("word/document.xml"))
+              ruby = root.findall(".//" + W + "ruby")
+              assert len(ruby) == 2, f"Expected 2 Chinese ruby characters, got {len(ruby)}"
+              ruby_pairs = []
+              for node in ruby:
+                  base = "".join(t.text or "" for t in node.findall(".//" + W + "rubyBase//" + W + "t"))
+                  py = "".join(t.text or "" for t in node.findall(".//" + W + "rt//" + W + "t"))
+                  ruby_pairs.append((base,py))
+              assert ruby_pairs == [("你","nǐ"), ("好","hǎo")], ruby_pairs
+              assert root.find(".//" + W + "b") is not None
+              assert root.find(".//" + W + "u") is not None
+              assert any(x.get(W+"val") == "FF0000" for x in root.findall(".//" + W + "color"))
+              assert any(x.get(W+"val") == "yellow" for x in root.findall(".//" + W + "highlight")) or any(x.get(W+"val") == "FFFF00" for x in root.findall(".//" + W + "shd"))
+              assert "1" in "".join(t.text or "" for t in root.findall(".//" + W + "t"))
+          doc = Document(p)
+          assert len(doc.paragraphs) >= 2
+          print("PASS: exported DOCX is a parsable Word file with two ruby pairs, styles and page number")
+          PY
       - name: Upload test reports even on failure
         if: always()
         uses: actions/upload-artifact@v4
