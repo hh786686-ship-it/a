@@ -87,8 +87,16 @@ public final class ConversionInstrumentedTest {
     for(int i=0;i<ruby.getLength();i++)
       assertEquals("r",ruby.item(i).getParentNode().getLocalName());
     // Store the real emulator-exported DOCX for desktop parsing and rendering checks.
-    File proof=new File(a.getExternalFilesDir(null),"verified-style-output.docx");
-    try(InputStream src=new FileInputStream(output);OutputStream dst=new FileOutputStream(proof)){
+    // Use MediaStore Downloads: app-private files vanish when Gradle uninstalls test APK.
+    android.content.ContentValues values=new android.content.ContentValues();
+    values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"mlkit-verified-style-output.docx");
+    values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/");
+    android.net.Uri destination=a.getContentResolver().insert(
+      android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
+    assertNotNull("Failed to create public DOCX in MediaStore",destination);
+    try(InputStream src=new FileInputStream(output);OutputStream dst=a.getContentResolver().openOutputStream(destination)){
+      assertNotNull(dst);
       byte[] chunk=new byte[8192];int len;
       while((len=src.read(chunk))!=-1)dst.write(chunk,0,len);
     }
