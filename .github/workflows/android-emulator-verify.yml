@@ -36,3 +36,12 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: ChineseOCR-Android
           script: gradle --no-daemon connectedDebugAndroidTest
+      - name: Upload test reports even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-instrumentation-reports
+          path: |
+            ChineseOCR-Android/app/build/outputs/androidTest-results/connected/
+            ChineseOCR-Android/app/build/reports/androidTests/connected/
+          if-no-files-found: warn
