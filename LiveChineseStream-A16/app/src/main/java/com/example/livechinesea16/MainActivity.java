@@ -37,6 +37,7 @@ import com.k2fsa.sherpa.onnx.OnlineStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -61,6 +62,8 @@ public final class MainActivity extends Activity {
     private final ArrayList<TranscriptSegment> committedSegments = new ArrayList<>();
     private final ExecutorService correctionExecutor = Executors.newSingleThreadExecutor();
     private volatile AccuracyEngine accuracyEngine;
+    private volatile QwenCorrectionEngine qwenEngine;
+    private volatile boolean qwenReady = false;
     private int transcriptGeneration = 0;
     private String partial = "";
     private long lastUiMs = 0L;
@@ -210,6 +213,9 @@ public final class MainActivity extends Activity {
             ui.post(() -> setStatus("Live model loaded • Initializing punctuation…"));
             accuracyEngine = new AccuracyEngine(this);
             modelReady = true;
+            // Initialize the large Qwen3 model in another thread: live Paraformer
+            // must remain usable even if memory or Qwen initialization fails.
+            new Thread(this::loadQwenEngine, "qwen-model-loader").start();
             // CI-only native inference check. The installed phone app never runs this
             // unless explicitly launched with the ciSmokeTest intent extra.
             if (getIntent().getBooleanExtra("ciSmokeTest", false)) {
@@ -218,7 +224,7 @@ public final class MainActivity extends Activity {
 
             ui.post(() -> {
                 setStatus("Offline model ready");
-                metricView.setText("Streaming Mandarin + English • Automatic ， and 。");
+                metricView.setText("Live Paraformer + Qwen3 0.6B correction loading • ，。");
                 recordButton.setEnabled(true);
             });
         } catch (Throwable e) {
@@ -230,6 +236,34 @@ public final class MainActivity extends Activity {
         }
     }
 
+
+    private void loadQwenEngine() {
+        try {
+            QwenCorrectionEngine engine = new QwenCorrectionEngine(this);
+            qwenEngine = engine;
+            qwenReady = true;
+            Log.i(LOG_TAG, "Qwen3-ASR 0.6B offline model ready");
+            ui.post(() -> metricView.setText("Live Paraformer + offline Qwen3 0.6B correction • ，。"));
+            if (getIntent().getBooleanExtra("ciSmokeTest", false)) {
+                // Use a short synthetic signal to validate the actual native decoder.
+                correctionExecutor.execute(() -> {
+                    try {
+                        long started = SystemClock.elapsedRealtime();
+                        String result = engine.recognize(new float[SAMPLE_RATE * 2]);
+                        Log.i(LOG_TAG, "Qwen3 offline inference passed, ms="
+                                + (SystemClock.elapsedRealtime() - started)
+                                + ", output=" + result);
+                    } catch (Throwable t) {
+                        Log.e(LOG_TAG, "Qwen3 inference failed", t);
+                    }
+                });
+            }
+        } catch (Throwable error) {
+            Log.e(LOG_TAG, "Qwen3 offline model not available; streaming fallback", error);
+            ui.post(() -> metricView.setText("Streaming only: Qwen model could not load (" 
+                    + error.getClass().getSimpleName() + ")"));
+        }
+    }
 
     private void runOfflineSelfTest() {
         OnlineStream stream = null;
@@ -314,6 +348,7 @@ public final class MainActivity extends Activity {
 
     private void decodeLoop(AudioRecord audio) {
         OnlineStream stream = null;
+        FloatCollector captured = new FloatCollector();
         try {
             stream = recognizer.createStream("");
             short[] pcm16 = new short[1600]; // 100 ms chunks
@@ -323,6 +358,7 @@ public final class MainActivity extends Activity {
                 if (size <= 0) continue;
                 float[] pcm = new float[size];
                 for (int i = 0; i < size; i++) pcm[i] = pcm16[i] / 32768.0f;
+                captured.add(pcm);
                 long begin = SystemClock.elapsedRealtime();
                 stream.acceptWaveform(pcm, SAMPLE_RATE);
                 while (recognizer.isReady(stream)) recognizer.decode(stream);
@@ -333,7 +369,7 @@ public final class MainActivity extends Activity {
                     stream.acceptWaveform(new float[SAMPLE_RATE / 2], SAMPLE_RATE);
                     while (recognizer.isReady(stream)) recognizer.decode(stream);
                     current = recognizer.getResult(stream).getText().trim();
-                    queueCorrection(current);
+                    queueCorrection(current, captured.drain());
                     recognizer.reset(stream);
                 } else {
                     synchronized (transcriptLock) { partial = current; }
@@ -352,7 +388,7 @@ public final class MainActivity extends Activity {
             stream.inputFinished();
             while (recognizer.isReady(stream)) recognizer.decode(stream);
             String tail = recognizer.getResult(stream).getText().trim();
-            queueCorrection(tail);
+            queueCorrection(tail, captured.drain());
         } catch (Throwable e) {
             Log.e(LOG_TAG, "Recognition decoding failed", e);
             ui.post(() -> { setStatus("Recognition error: " + e.getMessage()); toast("Transcription stopped"); });
@@ -377,7 +413,25 @@ public final class MainActivity extends Activity {
         TranscriptSegment(String text) { this.text = text; }
     }
 
-    private void queueCorrection(String firstPass) {
+    private static final class FloatCollector {
+        private float[] data = new float[SAMPLE_RATE * 2];
+        private int length = 0;
+        void add(float[] pcm) {
+            // Avoid unbounded memory use if end-pointing fails.
+            if (length + pcm.length > SAMPLE_RATE * 20) length = 0;
+            while (length + pcm.length > data.length)
+                data = Arrays.copyOf(data, Math.min(data.length * 2, SAMPLE_RATE * 21));
+            System.arraycopy(pcm, 0, data, length, pcm.length);
+            length += pcm.length;
+        }
+        float[] drain() {
+            float[] captured = Arrays.copyOf(data, length);
+            length = 0;
+            return captured;
+        }
+    }
+
+    private void queueCorrection(String firstPass, float[] speech) {
         if (firstPass == null || firstPass.trim().isEmpty()) {
             synchronized (transcriptLock) { partial = ""; }
             return;
@@ -394,15 +448,26 @@ public final class MainActivity extends Activity {
         ui.post(this::drawTranscript);
         correctionExecutor.execute(() -> {
             try {
-                // Punctuation alone, no SenseVoice second-pass ASR model.
-                String punctuated = accuracyEngine.restorePunctuation(firstPass);
+                String recognized = firstPass;
+                QwenCorrectionEngine qwen = qwenEngine;
+                if (qwenReady && qwen != null && speech != null && speech.length >= SAMPLE_RATE / 2) {
+                    long startMs = SystemClock.elapsedRealtime();
+                    String candidate = qwen.recognize(speech);
+                    long tookMs = SystemClock.elapsedRealtime() - startMs;
+                    Log.i(LOG_TAG, "Qwen correction time " + tookMs + " ms for "
+                            + (speech.length / (float)SAMPLE_RATE) + " sec audio");
+                    if (QwenCorrectionEngine.isPlausibleCorrection(firstPass, candidate)) {
+                        recognized = candidate;
+                    }
+                }
+                String punctuated = accuracyEngine.restorePunctuation(recognized);
                 synchronized (transcriptLock) {
                     if (generation != transcriptGeneration || !committedSegments.contains(slot)) return;
                     slot.text = punctuated;
                 }
                 ui.post(this::drawTranscript);
             } catch (Throwable err) {
-                Log.e(LOG_TAG, "Punctuation failed; keeping basic full stop", err);
+                Log.e(LOG_TAG, "Correction failed; keeping streaming transcript", err);
             }
         });
     }

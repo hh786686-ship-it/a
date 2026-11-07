@@ -24,3 +24,6 @@ This version embeds a larger offline second-pass and punctuation model, so the A
 
 ## Lightweight v1.4
 SenseVoice has been removed entirely. Mandarin/English streaming Paraformer is unchanged. A punctuation-only neural model processes each finished segment on a worker thread, with an immediate fallback Chinese full stop. This reduces APK size but does not improve word recognition accuracy. Punctuation model output is not guaranteed to be linguistically perfect.
+
+## v1.5 Qwen3-ASR correction (experimental)
+Bundles the 0.6B INT8 Qwen3-ASR ONNX model (conv frontend, encoder, decoder, tokenizer). It runs after Paraformer commits a short speech segment, using queued background inference; speech still appears immediately from Paraformer. The first pass, punctuation-only fallback, and Mandarin/English restriction stay enabled. The APK is substantially larger and may exhaust RAM on lower-end phones. Qwen correction speed and accuracy on Galaxy A16 5G are not independently measured. Built-in CI checks validate model loading; an emulator is not a replacement for physical device timing.

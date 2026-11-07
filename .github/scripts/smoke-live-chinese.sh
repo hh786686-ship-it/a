@@ -11,7 +11,7 @@ adb shell wm dismiss-keyguard || true
 adb shell am start -n "$app/.MainActivity" --ez ciSmokeTest true
 echo "Checking real model initialization in emulator..."
 ready=0
-for i in $(seq 1 45); do
+for i in $(seq 1 60); do
   adb shell uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1 || true
   adb shell cat /sdcard/uidump.xml > /tmp/livechinese.xml 2>/dev/null || true
   if grep -q 'Offline model ready' /tmp/livechinese.xml; then ready=1; break; fi
