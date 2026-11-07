@@ -35,7 +35,7 @@ public class MineruOnnxAndroidSmokeTest {
         try(OnnxTensor tensor=OnnxTensor.createTensor(env,FloatBuffer.wrap(data),shape);
             OrtSession.Result results=session.run(Collections.singletonMap("x",tensor))){
           assertTrue(results.size()>0);
-          assertTrue(results.get(0).isPresent());
+          assertNotNull(results.get(0).getValue());
         }
       }
     }
