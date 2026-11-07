@@ -9,7 +9,8 @@ android {
    testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
    versionCode 3
    versionName '0.4.0-mineru-onnx-experimental'
-   // Keep x86_64 for emulator tests; release arm64 variants can be restricted later.
+   // Emulator tests need x86_64. Build Samsung arm64-only with -PmineruArm64Release=true.
+   if (project.hasProperty('mineruArm64Release')) { ndk { abiFilters 'arm64-v8a' } }
  }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
