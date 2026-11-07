@@ -3,7 +3,6 @@ package com.example.chineseocr;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Rect;
-import com.google.mlkit.vision.text.Text;
 import java.util.*;
 
 /** Pixel-based document style recovery. It is an Android adaptation, not byte-identical Python v47. */
@@ -54,49 +53,6 @@ final class AndroidStyle {
   static int highlightName(String s){
     if(s==null)return Color.TRANSPARENT;
     switch(s){case "yellow":return Color.YELLOW;case "green":return Color.GREEN;case "cyan":return Color.CYAN;case "magenta":return Color.MAGENTA;case "red":return Color.RED;case "blue":return Color.BLUE;case "darkYellow":return Color.rgb(190,155,0);default:return Color.TRANSPARENT;}
-  }
-  static ArrayList<Mark> inspectLine(Bitmap bmp,Text.Line line){
-    String text=line.getText();
-    ArrayList<Mark> output=new ArrayList<>();
-    for(int i=0;i<text.length();i++)output.add(plain());
-    ArrayList<Float> thick=new ArrayList<>();
-    ArrayList<Mark> detected=new ArrayList<>();
-    ArrayList<Integer> offsets=new ArrayList<>();
-    for(Text.Element el:line.getElements()){
-      Rect r=el.getBoundingBox();String t=el.getText();if(r==null||t==null||t.isEmpty())continue;
-      int at=text.indexOf(t,offsets.isEmpty()?0:offsets.get(offsets.size()-1));
-      if(at<0)at=text.indexOf(t);if(at<0)continue;
-      offsets.add(at+t.length());
-      int count=t.length();
-      for(int k=0;k<count;k++){
-        int left=r.left+(r.width()*k)/count,right=r.left+(r.width()*(k+1))/count;
-        Rect c=new Rect(left,r.top,right,r.bottom);
-        Mark m=inspect(bmp,c);
-        float density=inkDensity(bmp,c);
-        detected.add(m);thick.add(density);
-        if(at+k<output.size())output.set(at+k,m);
-      }
-    }
-    // v47-inspired relative ink weighting, with local robust reference; avoid bold on isolated thick glyph.
-    if(thick.size()>=5){
-      ArrayList<Float> sorted=new ArrayList<>(thick);Collections.sort(sorted);
-      float median=sorted.get(sorted.size()/2);
-      float low=sorted.get(Math.max(0,sorted.size()/4));
-      float threshold=Math.max(median*1.34f,low*1.7f);
-      int k=0,searchFrom=0;
-      for(Text.Element el:line.getElements()){
-        String t=el.getText();if(t==null||t.isEmpty())continue;
-        int at=text.indexOf(t,searchFrom);
-        if(at<0)at=text.indexOf(t);
-        if(at<0)continue;
-        searchFrom=at+t.length();
-        for(int j=0;j<t.length()&&k<thick.size();j++,k++){
-          boolean near=(k>0&&thick.get(k-1)>threshold*.87f)||(k+1<thick.size()&&thick.get(k+1)>threshold*.87f);
-          if(at+j<output.size())output.get(at+j).bold=thick.get(k)>threshold&&near;
-        }
-      }
-    }
-    return output;
   }
   static float inkDensity(Bitmap bmp,Rect b){
     Rect r=inside(b,bmp);if(r.width()<2||r.height()<2)return 0;
