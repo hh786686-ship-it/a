@@ -34,7 +34,7 @@ s=open('/tmp/livechinese.xml').read()
 m=re.search(r'text="Start listening"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',s)
 if not m: raise SystemExit('Cannot find live start button')
 a,b,c,d=map(int,m.groups())
-open('/tmp/start-coordinates','w').write(f'{(a+c)//2} {(b+d)//2}')
+open('/tmp/start-coordinates','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
 PY
 read -r x y < /tmp/start-coordinates
 adb shell input tap "$x" "$y"
