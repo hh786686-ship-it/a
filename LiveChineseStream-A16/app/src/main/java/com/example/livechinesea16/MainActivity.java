@@ -261,7 +261,7 @@ public final class MainActivity extends Activity {
     private void decodeLoop(AudioRecord audio) {
         OnlineStream stream = null;
         try {
-            stream = recognizer.createStream();
+            stream = recognizer.createStream("");
             short[] pcm16 = new short[1600]; // 100 ms chunks
             while (recording) {
                 int size = audio.read(pcm16, 0, pcm16.length);
