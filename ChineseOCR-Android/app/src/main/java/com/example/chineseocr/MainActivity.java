@@ -329,12 +329,11 @@ public class MainActivity extends Activity {
                         ArrayList<ArrayList<AndroidStyle.Mark>> marksByPage)throws Exception{
     StringBuilder body=new StringBuilder();
     for(int page=0;page<pages.size();page++){
-      if(page>0)body.append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
       String data=pages.get(page);
       Map<Integer,String> contextPinyin=PinyinContext.overrides(data);
       int[] sizes=fit(data);
       int han=sizes[0]*2,pin=sizes[1]*2;
-      body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>")
+      body.append("<w:p><w:pPr><w:jc w:val=\"left\"/>"+(page>0?"<w:pageBreakBefore/>":"")+"</w:pPr>")
           .append(run(String.valueOf(nums.get(page)),AndroidStyle.plain(),han)).append("</w:p>");
       ArrayList<AndroidStyle.Mark> styles=page<marksByPage.size()?marksByPage.get(page):new ArrayList<>();
       body.append("<w:p><w:pPr><w:spacing w:line=\""+(han+pin+12)*10+"\" w:lineRule=\"atLeast\"/></w:pPr>");
@@ -351,7 +350,7 @@ public class MainActivity extends Activity {
       }
       body.append("</w:p>");
     }
-    String doc="<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"+body+"<w:sectPr/></w:body></w:document>";
+    String doc="<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"+body+"<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1020\" w:right=\"1040\" w:bottom=\"1020\" w:left=\"1040\" w:header=\"500\" w:footer=\"500\"/></w:sectPr></w:body></w:document>";
     String types="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/></Types>";
     String rels="<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/></Relationships>";
     try(ZipOutputStream zip=new ZipOutputStream(new FileOutputStream(file))){
