@@ -56,10 +56,49 @@ public final class AccuracyEngine {
         try {
             stream.acceptWaveform(samples, 16000);
             offline.decode(stream);
-            return restorePunctuation(offline.getResult(stream).getText());
+            String raw = sanitize(offline.getResult(stream).getText());
+            if (!isSupportedText(raw)) return "";
+            return restorePunctuation(raw);
         } finally {
             stream.release();
         }
+    }
+
+    /**
+     * SenseVoice is multilingual internally, but the app accepts correction text
+     * only in Mandarin (Han characters) or English (Latin characters).
+     * This guards against Korean/Japanese hallucinations on silence or noise.
+     */
+    public static boolean isSupportedText(String text) {
+        String s = sanitize(text);
+        if (s.isEmpty()) return false;
+        boolean hasWords = false;
+        for (int offset = 0; offset < s.length();) {
+            int cp = s.codePointAt(offset);
+            offset += Character.charCount(cp);
+            if (!Character.isLetter(cp)) continue;
+            Character.UnicodeScript script = Character.UnicodeScript.of(cp);
+            if (script != Character.UnicodeScript.HAN
+                    && script != Character.UnicodeScript.LATIN) return false;
+            hasWords = true;
+        }
+        return hasWords;
+    }
+
+    public static boolean isPlausibleCorrection(String provisional, String corrected) {
+        String oldText = sanitize(provisional);
+        String newText = sanitize(corrected);
+        if (!isSupportedText(newText)) return false;
+        if (oldText.isEmpty()) return false;
+        // Don't turn short Chinese phrases into unrelated English or vice versa.
+        boolean oldHan = CJK.matcher(oldText).find();
+        boolean newHan = CJK.matcher(newText).find();
+        if (oldHan != newHan) return false;
+        // Reject grossly different lengths from noisy/silent second-pass output.
+        int before = oldText.codePointCount(0, oldText.length());
+        int after = newText.codePointCount(0, newText.length());
+        return after >= Math.max(1, (int)Math.ceil(before * 0.35))
+                && after <= Math.max(3, (int)Math.ceil(before * 2.5));
     }
 
     public String restorePunctuation(String text) {

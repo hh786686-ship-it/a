@@ -255,6 +255,12 @@ public final class MainActivity extends Activity {
             String checked = accuracyEngine.recognize(new float[32000]);
             String sentences = accuracyEngine.restorePunctuation("今天我去学校明天我回家");
             if (!sentences.contains("。")) throw new IllegalStateException("Punctuation produced no full stop: " + sentences);
+            if (AccuracyEngine.isSupportedText("그.") || AccuracyEngine.isSupportedText("こんにちは")) {
+                throw new IllegalStateException("Language filter allowed Korean or Japanese output");
+            }
+            if (!AccuracyEngine.isSupportedText("今天学习 English")) {
+                throw new IllegalStateException("Language filter rejected valid Mandarin-English output");
+            }
             Log.i(LOG_TAG, "Second-pass and punctuation self-test OK; sample=" + sentences + ", speech=" + checked);
             if (decoded < 1) throw new IllegalStateException("Native recognizer decoded no audio frames");
             Log.i(LOG_TAG, "ASR silent self-test passed, decoded=" + decoded);
@@ -422,7 +428,7 @@ public final class MainActivity extends Activity {
                 // Offline SenseVoice sees the whole short utterance and can repair
                 // recognition errors made by the low-latency streaming model.
                 String secondPass = accuracyEngine.recognize(speech);
-                if (!secondPass.isEmpty()) {
+                if (AccuracyEngine.isPlausibleCorrection(firstPass, secondPass)) {
                     synchronized (transcriptLock) {
                         if (generation != transcriptGeneration || !committedSegments.contains(slot)) return;
                         slot.text = secondPass;
