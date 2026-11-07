@@ -84,6 +84,19 @@ jobs:
           gradle --no-daemon -PsmokeAbi=x86_64 clean assembleDebug
           unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/x86_64/libsherpa-onnx-jni.so'
 
+      - name: Free CI disk space for Android emulator
+        shell: bash
+        run: |
+          df -h /
+          # GitHub hosted runners ship with many unrelated SDKs.
+          sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift
+          sudo rm -rf /usr/local/lib/android/sdk/ndk /usr/local/lib/android/sdk/cmake
+          # Clean intermediate Gradle output, but keep the emulator APK.
+          cd LiveChineseStream-A16
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/LiveChineseOffline-x86_64.apk"
+          rm -rf app/build/intermediates app/build/tmp .gradle
+          df -h /
+
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

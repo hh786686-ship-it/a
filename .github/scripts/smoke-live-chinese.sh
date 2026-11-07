@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 app='com.example.livechinesea16'
-apk='LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk'
+apk="${RUNNER_TEMP}/LiveChineseOffline-x86_64.apk"
 adb install -r "$apk"
 adb shell pm grant "$app" android.permission.RECORD_AUDIO
 adb logcat -c
