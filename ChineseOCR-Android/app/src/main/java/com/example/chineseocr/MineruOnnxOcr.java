@@ -106,7 +106,7 @@ final class MineruOnnxOcr implements AutoCloseable {
       }
       if(pixels<8||right-left<3||bottom-top<3)continue;
       // Expand by ~one-third text height as a conservative DB-style approximation.
-      int pad=Math.max(3,(bottom-top)/4);
+      int pad=Math.max(5,(bottom-top)/2);
       Rect rect=new Rect(
         Math.max(0,(left-pad)*originalWidth/w),
         Math.max(0,(top-pad)*originalHeight/h),
@@ -138,8 +138,9 @@ final class MineruOnnxOcr implements AutoCloseable {
     return merged;
   }
   private String recognizeRegion(Bitmap page,Rect bounds)throws Exception{
-    Rect r=new Rect(Math.max(0,bounds.left),Math.max(0,bounds.top),
-        Math.min(page.getWidth(),bounds.right),Math.min(page.getHeight(),bounds.bottom));
+    int xPad=Math.max(3,bounds.height()/5);
+    Rect r=new Rect(Math.max(0,bounds.left-xPad),Math.max(0,bounds.top),
+        Math.min(page.getWidth(),bounds.right+xPad),Math.min(page.getHeight(),bounds.bottom));
     if(r.width()<4||r.height()<4)return "";
     Bitmap crop=Bitmap.createBitmap(page,r.left,r.top,r.width(),r.height());
     try{
