@@ -186,6 +186,39 @@ public final class ConversionInstrumentedTest {
     bmp.recycle();
   }
 
+  @Test public void multipleOriginalPagesProduceExplicitWordPageBreaks()throws Exception{
+    MainActivity a=activity();
+    File output=new File(a.getCacheDir(),"multipage-output.docx");
+    Method export=MainActivity.class.getDeclaredMethod("makeDocx",File.class,ArrayList.class,ArrayList.class,ArrayList.class);
+    export.setAccessible(true);
+    ArrayList<ArrayList<AndroidStyle.Mark>> styles=new ArrayList<>();
+    for(String text:new String[]{"第一页。","第二页。"}){
+      ArrayList<AndroidStyle.Mark> marks=new ArrayList<>();
+      for(int i=0;i<text.length();i++)marks.add(AndroidStyle.plain());
+      styles.add(marks);
+    }
+    export.invoke(a,output,new ArrayList<>(Arrays.asList(7,9)),
+      new ArrayList<>(Arrays.asList("第一页。","第二页。")),styles);
+    String xml=unzip(output,"word/document.xml");
+    assertEquals(1,xml.split("w:pageBreakBefore", -1).length-1);
+    assertTrue(xml.contains("w:pgSz"));
+    assertTrue(xml.contains("w:pgMar"));
+    assertTrue(xml.contains(">7<"));
+    assertTrue(xml.contains(">9<"));
+    android.content.ContentValues values=new android.content.ContentValues();
+    values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"mlkit-verified-two-source-pages.docx");
+    values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/");
+    Uri destination=a.getContentResolver().insert(
+      android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
+    assertNotNull(destination);
+    try(InputStream src=new FileInputStream(output);OutputStream dst=a.getContentResolver().openOutputStream(destination)){
+      assertNotNull(dst);
+      byte[] b=new byte[8192];int n;
+      while((n=src.read(b))!=-1)dst.write(b,0,n);
+    }
+  }
+
   @Test public void fontFittingHasOnlyElevenNineSeven()throws Exception{
     Method fit=MainActivity.class.getDeclaredMethod("fit",String.class);fit.setAccessible(true);
     int[] result=(int[])fit.invoke(null,"你好");
