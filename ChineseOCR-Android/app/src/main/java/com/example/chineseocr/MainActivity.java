@@ -32,8 +32,8 @@ public class MainActivity extends Activity {
     super.onCreate(b);
     LinearLayout box=new LinearLayout(this);box.setOrientation(1);box.setPadding(26,30,26,24);
     ScrollView sc=new ScrollView(this);sc.addView(box);setContentView(sc);
-    TextView title=new TextView(this);title.setText("Offline ML Kit OCR + Pinyin");title.setTextSize(25);box.addView(title);
-    TextView info=new TextView(this);info.setText("Offline ML Kit Chinese OCR (bundled model) for PDF; direct DOCX text reading. Editable Word with pinyin. PDF: pixel-based bold/colour/highlight/underline. DOCX: direct run formatting. Approximate 11/9/7 page fit and up to 2 small-text region rescans.");
+    TextView title=new TextView(this);title.setText("Experimental Offline MinerU ONNX OCR + Pinyin");title.setTextSize(25);box.addView(title);
+    TextView info=new TextView(this);info.setText("Experimental MinerU-4 ONNX OCR detector/recognizer running offline on device; direct DOCX input and pinyin. This is not the full MinerU document parser. Formatting is estimated.");
     Button pick=new Button(this);pick.setText("Choose PDF or DOCX");box.addView(pick);
     pick.setOnClickListener(v->{ Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"});startActivityForResult(i,OPEN);});
     range=new EditText(this);range.setHint("Original pages e.g. 2-7 (blank = all)");range.setSingleLine(true);box.addView(range);
@@ -81,77 +81,49 @@ public class MainActivity extends Activity {
   }
   private boolean looksLikePdf(Uri uri){try(InputStream i=getContentResolver().openInputStream(uri)){byte[] b=new byte[5];return i!=null&&i.read(b)==5&&"%PDF-".equals(new String(b,StandardCharsets.US_ASCII));}catch(Exception e){return false;}}
 
-  /** Offline OCR: the bundled Google ML Kit Chinese recognizer runs on-device. */
+  /** Experimental fully-local MinerU OCR ONNX engine; never silently use ML Kit. */
   private ArrayList<String> ocrPdf(Uri uri,String selection,ArrayList<Integer> selected)throws Exception {
     File local=new File(getCacheDir(),"input.pdf");
     try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(local)){
       if(in==null)throw new IOException("Cannot open PDF");
-      byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);
+      byte[] buf=new byte[65536];int n;
+      while((n=in.read(buf))!=-1)out.write(buf,0,n);
     }
     ArrayList<String> texts=new ArrayList<>();
-    com.google.mlkit.vision.text.TextRecognizer recognizer=
-       com.google.mlkit.vision.text.TextRecognition.getClient(
-          new com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions.Builder().build());
-    try {
-      try(ParcelFileDescriptor fd=ParcelFileDescriptor.open(local,ParcelFileDescriptor.MODE_READ_ONLY);
-          PdfRenderer pdf=new PdfRenderer(fd)){
-        selected.addAll(select(selection,pdf.getPageCount()));
-        for(int sourcePage:selected){
-          status("Offline ML Kit OCR: page "+sourcePage+" / "+pdf.getPageCount());
-          try(PdfRenderer.Page page=pdf.openPage(sourcePage-1)){
-            float scale=Math.min(2.0f,1900f/Math.max(page.getWidth(),page.getHeight()));
-            int w=Math.max(1,Math.round(page.getWidth()*scale));
-            int h=Math.max(1,Math.round(page.getHeight()*scale));
-            Bitmap bmp=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-            try{
-              bmp.eraseColor(Color.WHITE);
-              page.render(bmp,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-              com.google.mlkit.vision.text.Text scan=
-                  com.google.android.gms.tasks.Tasks.await(
-                      recognizer.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp,0)));
-              ArrayList<com.google.mlkit.vision.text.Text.Line> lines=new ArrayList<>();
-              for(com.google.mlkit.vision.text.Text.TextBlock block:scan.getTextBlocks())
-                lines.addAll(block.getLines());
-              Collections.sort(lines,(a,b)->{
-                android.graphics.Rect ar=a.getBoundingBox(),br=b.getBoundingBox();
-                if(ar==null||br==null)return 0;
-                int d=ar.top-br.top;
-                return Math.abs(d)>Math.max(9,Math.min(ar.height(),br.height())/2)?d:ar.left-br.left;
-              });
-              StringBuilder recognized=new StringBuilder();
-              ArrayList<AndroidStyle.Mark> marks=new ArrayList<>();
-              for(com.google.mlkit.vision.text.Text.Line line:lines){
-                if(line.getText().trim().isEmpty())continue;
-                recognized.append(line.getText()).append('\n');
-                marks.addAll(AndroidStyle.inspectLine(bmp,line));
-                marks.add(AndroidStyle.plain());
+    try(MineruOnnxOcr engine=new MineruOnnxOcr(this);
+        ParcelFileDescriptor fd=ParcelFileDescriptor.open(local,ParcelFileDescriptor.MODE_READ_ONLY);
+        PdfRenderer pdf=new PdfRenderer(fd)){
+      selected.addAll(select(selection,pdf.getPageCount()));
+      for(int pageNumber:selected){
+        status("MinerU ONNX offline OCR: page "+pageNumber+" / "+pdf.getPageCount());
+        try(PdfRenderer.Page page=pdf.openPage(pageNumber-1)){
+          float scale=Math.min(2f,1900f/Math.max(page.getWidth(),page.getHeight()));
+          int width=Math.max(1,Math.round(page.getWidth()*scale));
+          int height=Math.max(1,Math.round(page.getHeight()*scale));
+          Bitmap bitmap=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888);
+          try{
+            bitmap.eraseColor(Color.WHITE);
+            page.render(bitmap,null,null,PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            List<MineruOnnxOcr.TextRegion> regions=engine.recognize(bitmap);
+            StringBuilder out=new StringBuilder();
+            ArrayList<AndroidStyle.Mark> styles=new ArrayList<>();
+            for(MineruOnnxOcr.TextRegion region:regions){
+              String line=region.text;
+              if(line.isEmpty())continue;
+              out.append(line).append('\n');
+              for(int i=0;i<line.length();i++){
+                int left=region.box.left+region.box.width()*i/line.length();
+                int right=region.box.left+region.box.width()*(i+1)/line.length();
+                styles.add(AndroidStyle.inspect(bitmap,new Rect(left,region.box.top,right,region.box.bottom)));
               }
-              // Extra high-resolution region OCR: at most two scans, only for small OCR boxes.
-              ArrayList<android.graphics.Rect> regions=smallRegions(lines,bmp);
-              for(android.graphics.Rect region:regions){
-                Bitmap small=Bitmap.createBitmap(bmp,region.left,region.top,region.width(),region.height());
-                Bitmap enlarged=Bitmap.createScaledBitmap(small,small.getWidth()*2,small.getHeight()*2,true);
-                try{
-                  com.google.mlkit.vision.text.Text tiny=com.google.android.gms.tasks.Tasks.await(
-                    recognizer.process(com.google.mlkit.vision.common.InputImage.fromBitmap(enlarged,0)));
-                  for(com.google.mlkit.vision.text.Text.TextBlock block:tiny.getTextBlocks()){
-                    for(com.google.mlkit.vision.text.Text.Line line:block.getLines()){
-                      String found=line.getText().trim();
-                      if(found.length()>1&&!recognized.toString().contains(found)){
-                        recognized.append(found).append('\n');
-                        for(int c=0;c<found.length()+1;c++)marks.add(AndroidStyle.plain());
-                      }
-                    }
-                  }
-                }finally{small.recycle();enlarged.recycle();}
-              }
-              texts.add(recognized.toString());
-              pageMarks.add(marks);
-            }finally{bmp.recycle();}
-          }
+              styles.add(AndroidStyle.plain());
+            }
+            if(out.length()==0)throw new IOException("MinerU OCR found no text on page "+pageNumber);
+            texts.add(out.toString());pageMarks.add(styles);
+          }finally{bitmap.recycle();}
         }
       }
-    }finally{recognizer.close();}
+    }
     return texts;
   }
 
