@@ -328,6 +328,7 @@ public class MainActivity extends Activity {
     for(int page=0;page<pages.size();page++){
       if(page>0)body.append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>");
       String data=pages.get(page);
+      Map<Integer,String> contextPinyin=PinyinContext.overrides(data);
       int[] sizes=fit(data);
       int han=sizes[0]*2,pin=sizes[1]*2;
       body.append("<w:p><w:pPr><w:jc w:val=\"left\"/></w:pPr>")
@@ -341,7 +342,7 @@ public class MainActivity extends Activity {
         if(cp=='\r')continue;
         if(cp=='\n'){body.append("</w:p><w:p><w:pPr><w:spacing w:line=\""+(han+pin+12)*10+"\" w:lineRule=\"atLeast\"/></w:pPr>");continue;}
         AndroidStyle.Mark style=offset<styles.size()?styles.get(offset):AndroidStyle.plain();
-        String py=cp<=0xFFFF?pinyin((char)cp):"";
+        String py=contextPinyin.containsKey(offset)?contextPinyin.get(offset):(cp<=0xFFFF?pinyin((char)cp):"");
         String glyph=new String(Character.toChars(cp));
         body.append(py.isEmpty()?run(glyph,style,han):ruby((char)cp,py,style,han,pin));
       }
