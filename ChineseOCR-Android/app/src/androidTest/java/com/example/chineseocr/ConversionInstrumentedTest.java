@@ -69,6 +69,13 @@ public final class ConversionInstrumentedTest {
     assertTrue(xml.contains("<w:b/>"));assertTrue(xml.contains("<w:u w:val=\"single\"/>"));
     assertTrue(xml.contains("FF0000"));assertTrue(xml.contains("FFFF00"));
     assertTrue(xml.contains("<w:ruby>"));
+    byte[] actualDocx=java.nio.file.Files.readAllBytes(output.toPath());
+    assertTrue(actualDocx.length>250);
+    assertEquals((byte)'P',actualDocx[0]);
+    assertEquals((byte)'K',actualDocx[1]);
+    // Log the complete small test DOCX while the emulator app is still installed.
+    android.util.Log.i("VERIFIED_DOCX_BYTES",
+      android.util.Base64.encodeToString(actualDocx,android.util.Base64.NO_WRAP));
     // Verify the document is structurally valid WordprocessingML, not just well-formed XML.
     javax.xml.parsers.DocumentBuilderFactory factory=javax.xml.parsers.DocumentBuilderFactory.newInstance();
     factory.setNamespaceAware(true);
