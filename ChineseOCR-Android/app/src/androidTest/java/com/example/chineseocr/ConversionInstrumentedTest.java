@@ -132,4 +132,26 @@ public final class ConversionInstrumentedTest {
     bmp.recycle();
   }
 
+  @Test public void exportedDocxHandlesUnicodeAndEscaping()throws Exception{
+    MainActivity a=activity();
+    File output=new File(a.getCacheDir(),"unicode-output.docx");
+    String input="中文 & < > \" 𠀀 😀 "+(char)0x0001+" 尾";
+    Method export=MainActivity.class.getDeclaredMethod("makeDocx",File.class,ArrayList.class,ArrayList.class,ArrayList.class);
+    export.setAccessible(true);
+    ArrayList<ArrayList<AndroidStyle.Mark>> styles=new ArrayList<>();
+    ArrayList<AndroidStyle.Mark> m=new ArrayList<>();
+    for(int i=0;i<input.length();i++)m.add(AndroidStyle.plain());
+    styles.add(m);
+    export.invoke(a,output,new ArrayList<>(Arrays.asList(1)),new ArrayList<>(Arrays.asList(input)),styles);
+    String xml=unzip(output,"word/document.xml");
+    assertTrue(xml.contains("&amp;"));assertTrue(xml.contains("&lt;"));
+    assertTrue(xml.contains("𠀀"));assertTrue(xml.contains("😀"));
+    assertFalse(xml.contains(String.valueOf((char)0x0001)));
+    javax.xml.parsers.DocumentBuilderFactory f=javax.xml.parsers.DocumentBuilderFactory.newInstance();
+    f.setNamespaceAware(true);
+    org.w3c.dom.Document d=f.newDocumentBuilder().parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+    org.w3c.dom.NodeList ruby=d.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","ruby");
+    for(int i=0;i<ruby.getLength();i++)assertEquals("r",ruby.item(i).getParentNode().getLocalName());
+  }
+
 }
