@@ -4,6 +4,9 @@ on:
     branches:
       - mlkit-offline-chinese-pinyin
   workflow_dispatch:
+concurrency:
+  group: android-ocr-emulator-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   instrumentation:
     runs-on: ubuntu-latest
