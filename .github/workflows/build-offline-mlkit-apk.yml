@@ -4,6 +4,9 @@ on:
     branches:
       - mlkit-offline-chinese-pinyin
   workflow_dispatch:
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -17,7 +20,7 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - name: Install Android SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: /usr/local/lib/android/sdk/cmdline-tools/16.0/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Build offline OCR APK
         working-directory: ChineseOCR-Android
         run: gradle --no-daemon assembleDebug
