@@ -127,41 +127,6 @@ public class MainActivity extends Activity {
     return texts;
   }
 
-  /** Up to two genuinely small text boxes; skip normal-size blocks. */
-  private ArrayList<android.graphics.Rect> smallRegions(
-       ArrayList<com.google.mlkit.vision.text.Text.Line> lines,Bitmap bmp){
-    ArrayList<Integer> heights=new ArrayList<>();
-    for(com.google.mlkit.vision.text.Text.Line l:lines){
-      android.graphics.Rect r=l.getBoundingBox();if(r!=null&&r.height()>1)heights.add(r.height());
-    }
-    ArrayList<android.graphics.Rect> known=new ArrayList<>();
-    for(com.google.mlkit.vision.text.Text.Line line:lines)
-      if(line.getBoundingBox()!=null)known.add(line.getBoundingBox());
-    ArrayList<android.graphics.Rect> regions=SmallTextRegions.uncovered(bmp,known,2);
-    if(heights.size()<3)return regions;
-    Collections.sort(heights);int typical=heights.get(heights.size()/2);
-    ArrayList<android.graphics.Rect> candidates=new ArrayList<>();
-    for(com.google.mlkit.vision.text.Text.Line l:lines){
-      android.graphics.Rect r=l.getBoundingBox();
-      if(r==null||r.height()>=typical*.68f)continue;
-      int padX=Math.max(10,r.width()/4),padY=Math.max(8,r.height()*2);
-      android.graphics.Rect expanded=new android.graphics.Rect(
-        Math.max(0,r.left-padX),Math.max(0,r.top-padY),
-        Math.min(bmp.getWidth(),r.right+padX),Math.min(bmp.getHeight(),r.bottom+padY));
-      if(expanded.width()>8&&expanded.height()>8)candidates.add(expanded);
-    }
-    Collections.sort(candidates,(a,b)->Integer.compare(a.height(),b.height()));
-    for(android.graphics.Rect r:candidates){
-      boolean overlaps=false;
-      for(android.graphics.Rect chosen:regions){
-        android.graphics.Rect inter=new android.graphics.Rect();
-        if(inter.setIntersect(chosen,r)&&inter.width()*inter.height()>r.width()*r.height()*.5f){overlaps=true;break;}
-      }
-      if(!overlaps&&regions.size()<2)regions.add(r);
-      if(regions.size()>=2)break;
-    }
-    return regions;
-  }
   private ArrayList<String> extractDocx(Uri uri)throws Exception{
     byte[] doc;
     try(InputStream in=getContentResolver().openInputStream(uri);ByteArrayOutputStream out=new ByteArrayOutputStream()){
