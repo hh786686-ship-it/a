@@ -40,22 +40,15 @@ jobs:
           test $(wc -c < tokens.txt) -gt 50000
           file encoder.int8.onnx decoder.int8.onnx
           du -h *.onnx
-      - name: Download and verify high-accuracy offline correction model
+      - name: Download and verify offline punctuation model only
         shell: bash
         run: |
           set -euo pipefail
-          cd LiveChineseStream-A16/app/src/main/assets
-          mkdir -p secondpass punctuation
-          sv='https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main'
-          curl --fail --location --retry 5 --retry-delay 3 -o secondpass/model.int8.onnx "${sv}/model.int8.onnx"
-          curl --fail --location --retry 5 --retry-delay 3 -o secondpass/tokens.txt "${sv}/tokens.txt"
-          echo 'c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51  secondpass/model.int8.onnx' | sha256sum -c -
-          echo 'f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc  secondpass/tokens.txt' | sha256sum -c -
-          url='https://huggingface.co/lorneluo/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/resolve/main/model.int8.onnx'
-          curl --fail --location --retry 5 --retry-delay 3 -o punctuation/model.int8.onnx "$url"
-          echo '65a3fb9f5ad7bfb96bf69e0dc4481df97f6ee60513c1d94ce981ba6effd524b1  punctuation/model.int8.onnx' | sha256sum -c -
-          du -h secondpass/* punctuation/*
-
+          mkdir -p LiveChineseStream-A16/app/src/main/assets/punctuation
+          cd LiveChineseStream-A16/app/src/main/assets/punctuation
+          curl --fail --location --retry 5 --retry-delay 3 -o model.int8.onnx 'https://huggingface.co/lorneluo/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/resolve/main/model.int8.onnx'
+          echo '65a3fb9f5ad7bfb96bf69e0dc4481df97f6ee60513c1d94ce981ba6effd524b1  model.int8.onnx' | sha256sum -c -
+          du -h model.int8.onnx
       - name: Build debug APK
         working-directory: LiveChineseStream-A16
         run: gradle --no-daemon --stacktrace assembleDebug
@@ -73,8 +66,8 @@ jobs:
             exit 1
           fi
           unzip -l "$apk" | grep -E 'assets/(model|secondpass|punctuation)/.*(onnx|tokens.txt)'
-          unzip -l "$apk" | grep -q 'assets/secondpass/model.int8.onnx'
           unzip -l "$apk" | grep -q 'assets/punctuation/model.int8.onnx'
+          if unzip -Z1 "$apk" | grep -q 'assets/secondpass/'; then echo 'Unexpected SenseVoice second pass in APK' >&2; exit 1; fi
           unzip -l "$apk" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           ls -lh "$apk"
       - name: Build emulator x86_64 smoke-test APK

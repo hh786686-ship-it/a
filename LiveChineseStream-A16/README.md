@@ -1,6 +1,6 @@
 # Live Chinese Offline — Galaxy A16 5G
 
-An Android (ARM64) **true streaming** microphone transcription app. Free, private, no Google speech SDK and no internet permission. Mandarin and English via an offline streaming Paraformer for immediate partial results, plus a second-pass SenseVoice INT8 model correcting short completed utterances and a CT-Transformer adding Chinese punctuation (，、。) and appropriate ?/! marks. The high-accuracy pass runs on a background executor and may take longer than 2 seconds to replace the provisional words.
+An Android (ARM64) **true streaming** microphone transcription app. Free, private, no Google speech SDK and no internet permission. Mandarin and English via an offline streaming Paraformer for immediate partial results, and a smaller offline CT-Transformer adding Chinese punctuation (，、。) and appropriate ?/! marks. The SenseVoice second-pass model has been removed. The high-accuracy pass runs on a background executor and may take longer than 2 seconds to replace the provisional words.
 
 ## Behaviour
 - Partials update during speech using 100 ms input blocks (subject to model context and phone compute speed).
@@ -21,3 +21,6 @@ Building requires internet access, but **using the installed app does not**. Sou
 
 ## Accuracy trade-off
 This version embeds a larger offline second-pass and punctuation model, so the APK and memory use are higher than v1.2. Streaming interim words are shown first; corrections can arrive later. Accuracy improvements are model-dependent and not verified against the user's speech; 1–2-second correction latency is not guaranteed.
+
+## Lightweight v1.4
+SenseVoice has been removed entirely. Mandarin/English streaming Paraformer is unchanged. A punctuation-only neural model processes each finished segment on a worker thread, with an immediate fallback Chinese full stop. This reduces APK size but does not improve word recognition accuracy. Punctuation model output is not guaranteed to be linguistically perfect.

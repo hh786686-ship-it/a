@@ -37,7 +37,6 @@ import com.k2fsa.sherpa.onnx.OnlineStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -208,7 +207,7 @@ public final class MainActivity extends Activity {
             c.setEnableEndpoint(true);
 
             recognizer = new OnlineRecognizer(getAssets(), c);
-            ui.post(() -> setStatus("Live model loaded • Initializing accuracy and punctuation…"));
+            ui.post(() -> setStatus("Live model loaded • Initializing punctuation…"));
             accuracyEngine = new AccuracyEngine(this);
             modelReady = true;
             // CI-only native inference check. The installed phone app never runs this
@@ -219,7 +218,7 @@ public final class MainActivity extends Activity {
 
             ui.post(() -> {
                 setStatus("Offline model ready");
-                metricView.setText("Two-pass accuracy correction • Automatic ， and 。");
+                metricView.setText("Streaming Mandarin + English • Automatic ， and 。");
                 recordButton.setEnabled(true);
             });
         } catch (Throwable e) {
@@ -251,8 +250,7 @@ public final class MainActivity extends Activity {
                 decoded++;
             }
             recognizer.getResult(stream);
-            // Exercise real SenseVoice inference and neural punctuation in CI.
-            String checked = accuracyEngine.recognize(new float[32000]);
+            // Exercise neural punctuation in CI.
             String sentences = accuracyEngine.restorePunctuation("今天我去学校明天我回家");
             if (!sentences.contains("。")) throw new IllegalStateException("Punctuation produced no full stop: " + sentences);
             if (AccuracyEngine.isSupportedText("그.") || AccuracyEngine.isSupportedText("こんにちは")) {
@@ -261,7 +259,7 @@ public final class MainActivity extends Activity {
             if (!AccuracyEngine.isSupportedText("今天学习 English")) {
                 throw new IllegalStateException("Language filter rejected valid Mandarin-English output");
             }
-            Log.i(LOG_TAG, "Second-pass and punctuation self-test OK; sample=" + sentences + ", speech=" + checked);
+            Log.i(LOG_TAG, "Punctuation self-test OK; sample=" + sentences);
             if (decoded < 1) throw new IllegalStateException("Native recognizer decoded no audio frames");
             Log.i(LOG_TAG, "ASR silent self-test passed, decoded=" + decoded);
             ui.post(() -> setStatus("Offline model ready · Self-test passed"));
@@ -322,7 +320,6 @@ public final class MainActivity extends Activity {
 
     private void decodeLoop(AudioRecord audio) {
         OnlineStream stream = null;
-        FloatCollector captured = new FloatCollector();
         try {
             stream = recognizer.createStream("");
             short[] pcm16 = new short[1600]; // 100 ms chunks
@@ -332,7 +329,6 @@ public final class MainActivity extends Activity {
                 if (size <= 0) continue;
                 float[] pcm = new float[size];
                 for (int i = 0; i < size; i++) pcm[i] = pcm16[i] / 32768.0f;
-                captured.add(pcm);
                 long begin = SystemClock.elapsedRealtime();
                 stream.acceptWaveform(pcm, SAMPLE_RATE);
                 while (recognizer.isReady(stream)) recognizer.decode(stream);
@@ -343,7 +339,7 @@ public final class MainActivity extends Activity {
                     stream.acceptWaveform(new float[SAMPLE_RATE / 2], SAMPLE_RATE);
                     while (recognizer.isReady(stream)) recognizer.decode(stream);
                     current = recognizer.getResult(stream).getText().trim();
-                    queueCorrection(current, captured.drain());
+                    queueCorrection(current);
                     recognizer.reset(stream);
                 } else {
                     synchronized (transcriptLock) { partial = current; }
@@ -362,7 +358,7 @@ public final class MainActivity extends Activity {
             stream.inputFinished();
             while (recognizer.isReady(stream)) recognizer.decode(stream);
             String tail = recognizer.getResult(stream).getText().trim();
-            queueCorrection(tail, captured.drain());
+            queueCorrection(tail);
         } catch (Throwable e) {
             Log.e(LOG_TAG, "Recognition decoding failed", e);
             ui.post(() -> { setStatus("Recognition error: " + e.getMessage()); toast("Transcription stopped"); });
@@ -387,56 +383,32 @@ public final class MainActivity extends Activity {
         TranscriptSegment(String text) { this.text = text; }
     }
 
-    private static final class FloatCollector {
-        private float[] data = new float[SAMPLE_RATE * 2];
-        private int length = 0;
-        void add(float[] samples) {
-            if (length + samples.length > SAMPLE_RATE * 20) {
-                // Bound memory even if an endpoint is missed.
-                length = 0;
-            }
-            while (length + samples.length > data.length)
-                data = Arrays.copyOf(data, Math.min(data.length * 2, SAMPLE_RATE * 21));
-            System.arraycopy(samples, 0, data, length, samples.length);
-            length += samples.length;
+    private void queueCorrection(String firstPass) {
+        if (firstPass == null || firstPass.trim().isEmpty()) {
+            synchronized (transcriptLock) { partial = ""; }
+            return;
         }
-        float[] drain() {
-            float[] result = Arrays.copyOf(data, length);
-            length = 0;
-            return result;
-        }
-    }
-
-    private void queueCorrection(String firstPass, float[] speech) {
         final TranscriptSegment slot;
         final int generation;
         synchronized (transcriptLock) {
-            String draft = AccuracyEngine.ensureSentenceEnd(firstPass);
-            if (draft.isEmpty()) {
-                partial = "";
-                return;
-            }
-            slot = new TranscriptSegment(draft);
+            // Immediately display the segment with the requested Chinese full stop.
+            slot = new TranscriptSegment(AccuracyEngine.ensureSentenceEnd(firstPass));
             committedSegments.add(slot);
             partial = "";
             generation = transcriptGeneration;
         }
         ui.post(this::drawTranscript);
-        if (speech == null || speech.length < 3200) return;
         correctionExecutor.execute(() -> {
             try {
-                // Offline SenseVoice sees the whole short utterance and can repair
-                // recognition errors made by the low-latency streaming model.
-                String secondPass = accuracyEngine.recognize(speech);
-                if (AccuracyEngine.isPlausibleCorrection(firstPass, secondPass)) {
-                    synchronized (transcriptLock) {
-                        if (generation != transcriptGeneration || !committedSegments.contains(slot)) return;
-                        slot.text = secondPass;
-                    }
-                    ui.post(this::drawTranscript);
+                // Punctuation alone, no SenseVoice second-pass ASR model.
+                String punctuated = accuracyEngine.restorePunctuation(firstPass);
+                synchronized (transcriptLock) {
+                    if (generation != transcriptGeneration || !committedSegments.contains(slot)) return;
+                    slot.text = punctuated;
                 }
+                ui.post(this::drawTranscript);
             } catch (Throwable err) {
-                Log.e(LOG_TAG, "Second-pass correction failed; retaining streaming text", err);
+                Log.e(LOG_TAG, "Punctuation failed; keeping basic full stop", err);
             }
         });
     }
