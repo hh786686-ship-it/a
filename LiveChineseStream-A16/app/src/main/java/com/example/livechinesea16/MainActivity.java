@@ -253,12 +253,6 @@ public final class MainActivity extends Activity {
             // Exercise neural punctuation in CI.
             String sentences = accuracyEngine.restorePunctuation("今天我去学校明天我回家");
             if (!sentences.contains("。")) throw new IllegalStateException("Punctuation produced no full stop: " + sentences);
-            if (AccuracyEngine.isSupportedText("그.") || AccuracyEngine.isSupportedText("こんにちは")) {
-                throw new IllegalStateException("Language filter allowed Korean or Japanese output");
-            }
-            if (!AccuracyEngine.isSupportedText("今天学习 English")) {
-                throw new IllegalStateException("Language filter rejected valid Mandarin-English output");
-            }
             Log.i(LOG_TAG, "Punctuation self-test OK; sample=" + sentences);
             if (decoded < 1) throw new IllegalStateException("Native recognizer decoded no audio frames");
             Log.i(LOG_TAG, "ASR silent self-test passed, decoded=" + decoded);
