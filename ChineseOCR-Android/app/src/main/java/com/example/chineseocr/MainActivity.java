@@ -284,7 +284,7 @@ public class MainActivity extends Activity {
   private static String ruby(char c,String py,AndroidStyle.Mark mark,int han,int pin){
     return "<w:r><w:ruby><w:rubyPr><w:rubyAlign w:val=\"center\"/><w:hps w:val=\""+pin+"\"/><w:hpsRaise w:val=\""+(han+pin)+"\"/><w:hpsBaseText w:val=\""+han+"\"/></w:rubyPr>"
       +"<w:rt><w:r><w:rPr><w:sz w:val=\""+pin+"\"/></w:rPr><w:t>"+escape(py)+"</w:t></w:r></w:rt>"
-      +"<w:rubyBase><w:r>"+AndroidStyle.rpr(mark,han)+"<w:t>"+escape(String.valueOf(c))+"</w:t></w:r></w:rubyBase></w:ruby>";
+      +"<w:rubyBase><w:r>"+AndroidStyle.rpr(mark,han)+"<w:t>"+escape(String.valueOf(c))+"</w:t></w:r></w:rubyBase></w:ruby></w:r>";
   }
   // Approximate Word page capacity. Never repeatedly open the Word layout engine.
   private static int[] fit(String text){
