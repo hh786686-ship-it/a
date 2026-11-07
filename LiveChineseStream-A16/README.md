@@ -1,12 +1,12 @@
 # Live Chinese Offline — Galaxy A16 5G
 
-An Android (ARM64) **true streaming** microphone transcription app. Free, private, no Google speech SDK and no internet permission. Mandarin and English supported by a quantized **bilingual** streaming Paraformer ASR model via sherpa-onnx. Cantonese was intentionally removed.
+An Android (ARM64) **true streaming** microphone transcription app. Free, private, no Google speech SDK and no internet permission. Mandarin and English via an offline streaming Paraformer for immediate partial results, plus a second-pass SenseVoice INT8 model correcting short completed utterances and a CT-Transformer adding Chinese punctuation (，、。) and appropriate ?/! marks. The high-accuracy pass runs on a background executor and may take longer than 2 seconds to replace the provisional words.
 
 ## Behaviour
 - Partials update during speech using 100 ms input blocks (subject to model context and phone compute speed).
-- A pause of about 0.8 sec commits a segment; text is visible before then.
+- A pause of about 0.8 sec commits a provisional segment with a full stop. A second-pass recognizer and punctuation model can then improve the segment without blocking the live recognizer.
 - Start/stop, copy, text export using Android's document picker, and clear.
-- Entire int8 ASR model bundled in the APK at build time; **no internet after or during installation is needed for recognition**.
+- All streaming, offline-correction, and punctuation ONNX models are bundled in the APK at build time; **no internet is needed to transcribe**.
 - No call recording, background recording, or capturing audio from another app. Foreground microphone only.
 - Model time metric is just processing time per 100 ms chunk and is not a claim of total latency.
 
@@ -18,3 +18,6 @@ The workflow downloads these official assets at build time (with SHA-256 checks 
 - https://github.com/k2-fsa/sherpa-onnx
 
 Building requires internet access, but **using the installed app does not**. Source code is not the APK. The application has not been benchmarked on a physical A16 5G. The 1–2 sec latency objective is a target rather than a verified guarantee.
+
+## Accuracy trade-off
+This version embeds a larger offline second-pass and punctuation model, so the APK and memory use are higher than v1.2. Streaming interim words are shown first; corrections can arrive later. Accuracy improvements are model-dependent and not verified against the user's speech; 1–2-second correction latency is not guaranteed.

@@ -440,11 +440,11 @@ public final class MainActivity extends Activity {
             StringBuilder text = new StringBuilder();
             for (TranscriptSegment segment : committedSegments) {
                 if (segment.text.isEmpty()) continue;
-                if (text.length() > 0) text.append("\\n");
+                if (text.length() > 0) text.append("\n");
                 text.append(segment.text);
             }
             if (!partial.isEmpty()) {
-                if (text.length() > 0) text.append("\\n");
+                if (text.length() > 0) text.append("\n");
                 text.append(partial);
             }
             return text.toString();
