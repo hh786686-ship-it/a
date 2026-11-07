@@ -1,0 +1,61 @@
+name: Build Live Chinese Offline APK
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'LiveChineseStream-A16/**'
+      - '.github/workflows/build-live-chinese.yml'
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Download and verify trilingual streaming int8 model
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-trilingual-zh-cantonese-en/resolve/main'
+          mkdir -p LiveChineseStream-A16/app/src/main/assets/model
+          cd LiveChineseStream-A16/app/src/main/assets/model
+          for file in encoder.int8.onnx decoder.int8.onnx tokens.txt; do
+            curl --fail --location --retry 5 --retry-delay 2 -o "$file" "${base}/${file}"
+          done
+          echo '6047a644b41b236d9d8e89e3b94ef39d1b7037daab028131b722ca52e10b0357  encoder.int8.onnx' | sha256sum -c -
+          echo '545427acf508452b7d89969be082c8128c681e3432ff43aef09f6159f4b61a7e  decoder.int8.onnx' | sha256sum -c -
+          test $(wc -c < tokens.txt) -gt 50000
+          file encoder.int8.onnx decoder.int8.onnx
+          du -h *.onnx
+      - name: Build debug APK
+        working-directory: LiveChineseStream-A16
+        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Verify APK integrity and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -18
+          if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -q 'android.permission.INTERNET'; then
+            echo 'Unexpected network permission' >&2
+            exit 1
+          fi
+          unzip -l "$apk" | grep -E 'assets/model/(encoder.int8.onnx|decoder.int8.onnx|tokens.txt)'
+          ls -lh "$apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveChineseOffline-A16-APK
+          path: LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
