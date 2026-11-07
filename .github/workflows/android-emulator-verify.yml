@@ -35,7 +35,11 @@ jobs:
           profile: pixel_4
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           working-directory: ChineseOCR-Android
-          script: gradle --no-daemon connectedDebugAndroidTest
+          script: |
+            gradle --no-daemon connectedDebugAndroidTest
+            mkdir -p app/build/verified-docx
+            adb pull /sdcard/Download/mlkit-verified-style-output.docx app/build/verified-docx/verified-style-output.docx
+            test -s app/build/verified-docx/verified-style-output.docx
       - name: Upload test reports even on failure
         if: always()
         uses: actions/upload-artifact@v4
@@ -44,4 +48,5 @@ jobs:
           path: |
             ChineseOCR-Android/app/build/outputs/androidTest-results/connected/
             ChineseOCR-Android/app/build/reports/androidTests/connected/
+            ChineseOCR-Android/app/build/verified-docx/
           if-no-files-found: warn
