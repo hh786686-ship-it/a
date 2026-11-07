@@ -15,6 +15,7 @@ import java.util.*;
 public class MineruOnnxAndroidSmokeTest {
   private File modelFile(Context ctx,String name)throws Exception{
     File dest=new File(ctx.getCacheDir(),name);
+    if(!dest.getParentFile().exists()&&!dest.getParentFile().mkdirs())throw new IOException("Cannot create test cache");
     try(InputStream in=ctx.getAssets().open(name);OutputStream out=new FileOutputStream(dest)){
       byte[] buffer=new byte[32768];int n;
       while((n=in.read(buffer))!=-1)out.write(buffer,0,n);
@@ -23,7 +24,7 @@ public class MineruOnnxAndroidSmokeTest {
     return dest;
   }
   private void runModel(String name,long[] shape)throws Exception{
-    Context context=InstrumentationRegistry.getInstrumentation().getContext();
+    Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
     File model=modelFile(context,name);
     OrtEnvironment env=OrtEnvironment.getEnvironment();
     try(OrtSession.SessionOptions options=new OrtSession.SessionOptions()){
