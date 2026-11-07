@@ -105,6 +105,18 @@ public final class ConversionInstrumentedTest {
     Field markField=MainActivity.class.getDeclaredField("pageMarks");markField.setAccessible(true);
     @SuppressWarnings("unchecked") ArrayList<ArrayList<AndroidStyle.Mark>> marks=(ArrayList<ArrayList<AndroidStyle.Mark>>)markField.get(a);
     assertEquals(texts.get(0).length(),marks.get(0).size());
+    File docx=new File(a.getCacheDir(),"pdf-ocr-output.docx");
+    Method export=MainActivity.class.getDeclaredMethod("makeDocx",File.class,ArrayList.class,ArrayList.class,ArrayList.class);
+    export.setAccessible(true);
+    export.invoke(a,docx,selected,texts,marks);
+    String xml=unzip(docx,"word/document.xml");
+    assertTrue(xml.contains("<w:ruby>"));
+    javax.xml.parsers.DocumentBuilderFactory factory=javax.xml.parsers.DocumentBuilderFactory.newInstance();
+    factory.setNamespaceAware(true);
+    org.w3c.dom.Document parsed=factory.newDocumentBuilder().parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+    org.w3c.dom.NodeList ruby=parsed.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","ruby");
+    assertTrue("OCR output should contain Chinese pinyin",ruby.getLength()>=2);
+    for(int i=0;i<ruby.getLength();i++)assertEquals("r",ruby.item(i).getParentNode().getLocalName());
   }
 
   @Test public void fontFittingHasOnlyElevenNineSeven()throws Exception{
