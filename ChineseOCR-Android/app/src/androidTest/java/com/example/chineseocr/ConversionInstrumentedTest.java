@@ -134,6 +134,18 @@ public final class ConversionInstrumentedTest {
     org.w3c.dom.NodeList ruby=parsed.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","ruby");
     assertTrue("OCR output should contain Chinese pinyin",ruby.getLength()>=2);
     for(int i=0;i<ruby.getLength();i++)assertEquals("r",ruby.item(i).getParentNode().getLocalName());
+    android.content.ContentValues values=new android.content.ContentValues();
+    values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"mlkit-verified-pdf-ocr-output.docx");
+    values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Download/");
+    android.net.Uri destination=a.getContentResolver().insert(
+      android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,values);
+    assertNotNull("Cannot save OCR DOCX for external verification",destination);
+    try(InputStream src=new FileInputStream(docx);OutputStream dst=a.getContentResolver().openOutputStream(destination)){
+      assertNotNull(dst);
+      byte[] b=new byte[8192];int n;
+      while((n=src.read(b))!=-1)dst.write(b,0,n);
+    }
   }
 
   @Test public void fontFittingHasOnlyElevenNineSeven()throws Exception{
