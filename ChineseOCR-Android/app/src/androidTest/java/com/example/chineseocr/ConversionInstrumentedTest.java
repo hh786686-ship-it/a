@@ -69,6 +69,20 @@ public final class ConversionInstrumentedTest {
     assertTrue(xml.contains("<w:b/>"));assertTrue(xml.contains("<w:u w:val=\"single\"/>"));
     assertTrue(xml.contains("FF0000"));assertTrue(xml.contains("FFFF00"));
     assertTrue(xml.contains("<w:ruby>"));
+    // Verify the document is structurally valid WordprocessingML, not just well-formed XML.
+    javax.xml.parsers.DocumentBuilderFactory factory=javax.xml.parsers.DocumentBuilderFactory.newInstance();
+    factory.setNamespaceAware(true);
+    org.w3c.dom.Document parsed=factory.newDocumentBuilder().parse(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+    org.w3c.dom.NodeList ruby=parsed.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","ruby");
+    assertEquals(2,ruby.getLength());
+    for(int i=0;i<ruby.getLength();i++)
+      assertEquals("r",ruby.item(i).getParentNode().getLocalName());
+    // Store the real emulator-exported DOCX for desktop parsing and rendering checks.
+    File proof=new File(a.getExternalFilesDir(null),"verified-style-output.docx");
+    try(InputStream src=new FileInputStream(output);OutputStream dst=new FileOutputStream(proof)){
+      byte[] chunk=new byte[8192];int len;
+      while((len=src.read(chunk))!=-1)dst.write(chunk,0,len);
+    }
   }
 
   @Test public void realBundledMLKitRecognizesGeneratedChinesePdf()throws Exception{
