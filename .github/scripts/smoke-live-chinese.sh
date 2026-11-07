@@ -46,23 +46,37 @@ adb shell wm dismiss-keyguard || true
 adb shell am start -n "$app/.MainActivity"
 sleep 2
 adb shell input tap "$x" "$y"
-sleep 4
-adb shell uiautomator dump /sdcard/firsttap.xml >/dev/null 2>&1 || true
-adb shell cat /sdcard/firsttap.xml > /tmp/livechinese-firsttap.xml 2>/dev/null || true
-if ! grep -q 'Stop and finish' /tmp/livechinese-firsttap.xml; then
-  echo "First tap did not change button; retrying with touch hold"
-  adb shell input swipe "$x" "$y" "$x" "$y" 180
-fi
-sleep 6
+sleep 8
 adb shell uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1
 adb shell cat /sdcard/uidump.xml > /tmp/livechinese-recording.xml
-if ! grep -q 'Stop and finish' /tmp/livechinese-recording.xml; then
-  echo 'Recording did not start successfully'
+adb logcat -d -v brief -s "LiveChineseA16:*" > /tmp/livechinese.log
+echo "App events:"
+cat /tmp/livechinese.log | tail -80
+# A genuine microphone start AND at least one decoded audio chunk must occur.
+# The emulator can delay UI accessibility snapshots while the recognition thread runs.
+if ! grep -q 'AudioRecord state after start: 3' /tmp/livechinese.log; then
+  echo 'FAIL: AudioRecord never reached RECORDSTATE_RECORDING'
   cat /tmp/livechinese-recording.xml
-  adb logcat -d -v brief -s "LiveChineseA16:*" "AudioRecord:*" "AudioFlinger:*" "AndroidRuntime:*" | tail -200
-  adb logcat -d -t 900 | tail -300
+  adb logcat -d -t 500 | tail -150
   exit 1
 fi
+if ! grep -q 'Model processing:' /tmp/livechinese-recording.xml; then
+  echo 'FAIL: app did not report processing microphone audio through recognizer'
+  cat /tmp/livechinese-recording.xml
+  adb logcat -d -t 500 | tail -150
+  exit 1
+fi
+if grep -q 'Recognition error:\|Microphone error:' /tmp/livechinese-recording.xml; then
+  echo 'FAIL: app reports a microphone/recognition error'
+  cat /tmp/livechinese-recording.xml
+  exit 1
+fi
+if grep -E -q 'E/LiveChineseA16|Recognition decoding failed|Microphone startup exception' /tmp/livechinese.log; then
+  echo 'FAIL: app logged a microphone/recognition exception'
+  cat /tmp/livechinese.log
+  exit 1
+fi
+echo 'PASS: microphone reached RECORDING and on-device model processed an audio chunk'
 if adb logcat -d -v brief | grep -q 'FATAL EXCEPTION'; then
   echo 'FATAL EXCEPTION found in Android log'
   adb logcat -d -t 900 | tail -300
