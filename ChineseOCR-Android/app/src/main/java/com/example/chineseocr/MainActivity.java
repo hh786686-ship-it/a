@@ -258,7 +258,25 @@ public class MainActivity extends Activity {
     }
     ArrayList<Integer> order=new ArrayList<>(chosen);Collections.sort(order);return order;
   }
-  private static String escape(String s){return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;");}
+  /** Convert arbitrary OCR text into valid XML 1.0 character data. */
+  private static String escape(String source){
+    StringBuilder out=new StringBuilder(source.length()+8);
+    for(int i=0;i<source.length();){
+      int cp=source.codePointAt(i);
+      i+=Character.charCount(cp);
+      boolean valid=cp==9||cp==10||cp==13||
+        (cp>=32&&cp<=0xD7FF)||
+        (cp>=0xE000&&cp<=0xFFFD)||
+        (cp>=0x10000&&cp<=0x10FFFF);
+      if(!valid){out.append('\uFFFD');continue;}
+      if(cp=='&')out.append("&amp;");
+      else if(cp=='<')out.append("&lt;");
+      else if(cp=='>')out.append("&gt;");
+      else if(cp=='"')out.append("&quot;");
+      else out.appendCodePoint(cp);
+    }
+    return out.toString();
+  }
 
   private static String run(String s,AndroidStyle.Mark m,int han){
     return "<w:r>"+AndroidStyle.rpr(m,han)+"<w:t xml:space=\"preserve\">"+escape(s)+"</w:t></w:r>";
@@ -311,12 +329,16 @@ public class MainActivity extends Activity {
           .append(run(String.valueOf(nums.get(page)),AndroidStyle.plain(),han)).append("</w:p>");
       ArrayList<AndroidStyle.Mark> styles=page<marksByPage.size()?marksByPage.get(page):new ArrayList<>();
       body.append("<w:p><w:pPr><w:spacing w:line=\""+(han+pin+12)*10+"\" w:lineRule=\"atLeast\"/></w:pPr>");
-      for(int i=0;i<data.length();i++){
-        char ch=data.charAt(i);if(ch=='\r')continue;
-        if(ch=='\n'){body.append("</w:p><w:p><w:pPr><w:spacing w:line=\""+(han+pin+12)*10+"\" w:lineRule=\"atLeast\"/></w:pPr>");continue;}
-        AndroidStyle.Mark style=i<styles.size()?styles.get(i):AndroidStyle.plain();
-        String py=pinyin(ch);
-        body.append(py.isEmpty()?run(String.valueOf(ch),style,han):ruby(ch,py,style,han,pin));
+      for(int i=0;i<data.length();){
+        int cp=data.codePointAt(i);
+        int offset=i;
+        i+=Character.charCount(cp);
+        if(cp=='\r')continue;
+        if(cp=='\n'){body.append("</w:p><w:p><w:pPr><w:spacing w:line=\""+(han+pin+12)*10+"\" w:lineRule=\"atLeast\"/></w:pPr>");continue;}
+        AndroidStyle.Mark style=offset<styles.size()?styles.get(offset):AndroidStyle.plain();
+        String py=cp<=0xFFFF?pinyin((char)cp):"";
+        String glyph=new String(Character.toChars(cp));
+        body.append(py.isEmpty()?run(glyph,style,han):ruby((char)cp,py,style,han,pin));
       }
       body.append("</w:p>");
     }
