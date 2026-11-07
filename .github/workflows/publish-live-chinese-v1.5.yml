@@ -1,0 +1,52 @@
+name: Publish verified Live Chinese v1.5 APK
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-live-chinese-v1.5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download successfully tested APK from build #42392250377
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified
+          gh run download 42392250377 --repo "${{ github.repository }}" --name LiveChineseOffline-A16-APK --dir verified
+          ls -lah verified
+          test -f verified/LiveChineseOffline-A16.apk
+          test $(wc -c < verified/LiveChineseOffline-A16.apk) -gt 1000000000
+
+      - name: Prepare and verify release APK
+        run: |
+          set -euo pipefail
+          mv verified/LiveChineseOffline-A16.apk verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk
+          unzip -t verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk | tail -2
+          unzip -Z1 verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk | grep -q '^assets/qwen/decoder.int8.onnx$'
+          unzip -Z1 verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk | grep -q '^assets/model/encoder.int8.onnx$'
+          sha256sum verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk
+          du -h verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk
+
+      - name: Publish direct APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.5.0 --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload v1.5.0 verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk --repo "${{ github.repository }}" --clobber
+          else
+            gh release create v1.5.0 verified/LiveChineseOffline-v1.5-Qwen3-0.6B-ARM64.apk \
+              --repo "${{ github.repository }}" \
+              --title "Live Chinese Offline v1.5 - Qwen3 0.6B correction" \
+              --notes "Experimental v1.5, Android 9+ ARM64. Offline Mandarin/English live Paraformer; Qwen3-ASR 0.6B INT8 checks completed segments; Chinese punctuation; 24sp transcript. Android emulator native model loading, 2s silent-sample Qwen inference, Paraformer decoding, punctuation and microphone tests passed. 1.774s Qwen latency on an emulator for silence does NOT prove 2s on Galaxy A16; accuracy is unmeasured on the user's speech. Large offline APK (>1GB)." \
+              --target "${{ github.sha }}"
+          fi
+          gh release view v1.5.0 --repo "${{ github.repository }}" --json url,assets
