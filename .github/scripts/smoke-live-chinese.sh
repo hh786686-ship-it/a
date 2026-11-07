@@ -5,6 +5,9 @@ apk='LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk'
 adb install -r "$apk"
 adb shell pm grant "$app" android.permission.RECORD_AUDIO
 adb logcat -c
+adb shell svc power stayon true
+adb shell input keyevent KEYCODE_WAKEUP
+adb shell wm dismiss-keyguard || true
 adb shell am start -n "$app/.MainActivity"
 echo "Checking real model initialization in emulator..."
 ready=0
@@ -37,8 +40,20 @@ a,b,c,d=map(int,m.groups())
 open('/tmp/start-coordinates','w').write(f'{(a+c)//2} {(b+d)//2}\n')
 PY
 read -r x y < /tmp/start-coordinates
+echo "Tapping microphone button at $x,$y"
+adb shell input keyevent KEYCODE_WAKEUP
+adb shell wm dismiss-keyguard || true
+adb shell am start -n "$app/.MainActivity"
+sleep 2
 adb shell input tap "$x" "$y"
-sleep 8
+sleep 4
+adb shell uiautomator dump /sdcard/firsttap.xml >/dev/null 2>&1 || true
+adb shell cat /sdcard/firsttap.xml > /tmp/livechinese-firsttap.xml 2>/dev/null || true
+if ! grep -q 'Stop and finish' /tmp/livechinese-firsttap.xml; then
+  echo "First tap did not change button; retrying with touch hold"
+  adb shell input swipe "$x" "$y" "$x" "$y" 180
+fi
+sleep 6
 adb shell uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1
 adb shell cat /sdcard/uidump.xml > /tmp/livechinese-recording.xml
 if ! grep -q 'Stop and finish' /tmp/livechinese-recording.xml; then
