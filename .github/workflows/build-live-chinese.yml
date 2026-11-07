@@ -80,7 +80,7 @@ jobs:
           arch: x86_64
           ram-size: 4096M
           heap-size: 768M
-          disk-size: 6G
+          disk-size: 2G
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: bash .github/scripts/smoke-live-chinese.sh
 
