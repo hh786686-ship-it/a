@@ -47,6 +47,10 @@ jobs:
             test -s app/build/verified-docx/verified-pdf-ocr-output.docx
             adb pull /sdcard/Download/mlkit-verified-two-source-pages.docx app/build/verified-docx/verified-two-source-pages.docx
             test -s app/build/verified-docx/verified-two-source-pages.docx
+            adb pull /sdcard/Download/benchmark-1-output.docx app/build/verified-docx/benchmark-1-output.docx
+            adb pull /sdcard/Download/benchmark-2-output.docx app/build/verified-docx/benchmark-2-output.docx
+            test -s app/build/verified-docx/benchmark-1-output.docx
+            test -s app/build/verified-docx/benchmark-2-output.docx
       - name: Independently validate exported Word document
         run: |
           python -m pip install --quiet python-docx
@@ -92,6 +96,14 @@ jobs:
               two_root = ET.fromstring(z.read("word/document.xml"))
               assert len(two_root.findall(".//" + W + "pageBreakBefore")) == 1
           assert len(Document(two).paragraphs) >= 4
+          for idx in (1, 2):
+              benchmark = f"ChineseOCR-Android/app/build/verified-docx/benchmark-{idx}-output.docx"
+              assert len(Document(benchmark).paragraphs) >= 2
+              with zipfile.ZipFile(benchmark) as z:
+                  assert z.testzip() is None
+                  root = ET.fromstring(z.read("word/document.xml"))
+                  assert len(root.findall(".//" + W + "ruby")) >= 60
+          print("PASS: both generated benchmark PDF exports pass desktop DOCX parse checks")
           print("PASS: both emulator PDF OCR and DOCX-direct outputs are readable Word documents")
           PY
       - name: Render actual Word exports and verify one-page fit
@@ -114,6 +126,14 @@ jobs:
               assert len(reader.pages) == 1, f"{name}: output overflowed to {len(reader.pages)} pages"
               assert reader.pages[0].mediabox.width > 500
               print("PASS: rendered Word export", name, "fits one A4 page")
+          for index in (1, 2):
+              src = f"ChineseOCR-Android/app/build/verified-docx/benchmark-{index}-output.docx"
+              import subprocess
+              subprocess.run(["libreoffice","-env:UserInstallation=file:///tmp/lo-chinese-ocr-check",
+                  "--headless","--convert-to","pdf","--outdir","/tmp/rendered-docx",src],check=True)
+              result = PdfReader(f"/tmp/rendered-docx/benchmark-{index}-output.pdf")
+              assert len(result.pages) == 1, f"Benchmark {index} spills across {len(result.pages)} pages"
+          print("PASS: two different Chinese PDF OCR Word exports fit a single page each")
           pages = PdfReader("/tmp/rendered-docx/verified-two-source-pages.pdf")
           assert len(pages.pages) == 2, f"Expected 2 source pages, got {len(pages.pages)}"
           print("PASS: two source pages rendered as exactly two Word pages")
