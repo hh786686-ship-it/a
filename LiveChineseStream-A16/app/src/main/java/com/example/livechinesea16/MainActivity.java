@@ -141,7 +141,7 @@ public final class MainActivity extends Activity {
         transcriptScroller.setFillViewport(true);
         transcriptScroller.setBackgroundColor(Color.rgb(25, 39, 58));
         transcriptView = label("Tap Start listening and begin speaking. Text will appear before you finish your sentence.",
-                21, Color.rgb(229, 236, 245), false);
+                24, Color.rgb(229, 236, 245), false);
         transcriptView.setPadding(dp(15), dp(16), dp(15), dp(16));
         transcriptView.setTextIsSelectable(true);
         transcriptScroller.addView(transcriptView);
