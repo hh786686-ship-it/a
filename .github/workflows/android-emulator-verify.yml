@@ -38,7 +38,8 @@ jobs:
           script: |
             gradle --no-daemon connectedDebugAndroidTest
             mkdir -p app/build/verified-docx
-            adb pull /sdcard/Android/data/com.example.chineseocr/files/verified-style-output.docx app/build/verified-docx/verified-style-output.docx
+            adb exec-out run-as com.example.chineseocr cat cache/style-output.docx > app/build/verified-docx/verified-style-output.docx
+            test -s app/build/verified-docx/verified-style-output.docx
       - name: Upload test reports even on failure
         if: always()
         uses: actions/upload-artifact@v4
