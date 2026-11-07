@@ -148,6 +148,29 @@ public final class ConversionInstrumentedTest {
     }
   }
 
+  @Test public void contextualMandarinPinyinSurvivesWordExport()throws Exception{
+    String chinese="银行行长喜欢音乐，也觉得快乐。重庆很重要。";
+    Map<Integer,String> p=PinyinContext.overrides(chinese);
+    assertEquals("yín",p.get(chinese.indexOf("银行")));
+    assertEquals("háng",p.get(chinese.indexOf("银行")+1));
+    assertEquals("zhǎng",p.get(chinese.indexOf("行长")+1));
+    assertEquals("yuè",p.get(chinese.indexOf("音乐")+1));
+    assertEquals("chóng",p.get(chinese.indexOf("重庆")));
+    assertEquals("zhòng",p.get(chinese.indexOf("重要")));
+    MainActivity a=activity();
+    File out=new File(a.getCacheDir(),"context-output.docx");
+    Method export=MainActivity.class.getDeclaredMethod("makeDocx",File.class,ArrayList.class,ArrayList.class,ArrayList.class);
+    export.setAccessible(true);
+    ArrayList<ArrayList<AndroidStyle.Mark>> marks=new ArrayList<>();
+    ArrayList<AndroidStyle.Mark> m=new ArrayList<>();
+    for(int i=0;i<chinese.length();i++)m.add(AndroidStyle.plain());
+    marks.add(m);
+    export.invoke(a,out,new ArrayList<>(Arrays.asList(1)),new ArrayList<>(Arrays.asList(chinese)),marks);
+    String xml=unzip(out,"word/document.xml");
+    for(String py:new String[]{"háng","zhǎng","yuè","chóng","zhòng"})
+      assertTrue("Missing contextual pinyin "+py,xml.contains(py));
+  }
+
   @Test public void fontFittingHasOnlyElevenNineSeven()throws Exception{
     Method fit=MainActivity.class.getDeclaredMethod("fit",String.class);fit.setAccessible(true);
     int[] result=(int[])fit.invoke(null,"你好");
