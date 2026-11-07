@@ -66,7 +66,8 @@ jobs:
               assert ruby_pairs == [("你","nǐ"), ("好","hǎo")], ruby_pairs
               assert root.find(".//" + W + "b") is not None
               assert root.find(".//" + W + "u") is not None
-              assert any(x.get(W+"val") == "FF0000" for x in root.findall(".//" + W + "color"))
+              colors = [x.get(W+"val") for x in root.findall(".//" + W + "color")]
+              assert "FF0000" in colors, f"Red source text was not preserved in export: {colors!r}"
               assert any(x.get(W+"val") == "yellow" for x in root.findall(".//" + W + "highlight")) or any(x.get(W+"val") == "FFFF00" for x in root.findall(".//" + W + "shd"))
               assert "1" in "".join(t.text or "" for t in root.findall(".//" + W + "t"))
           doc = Document(p)
