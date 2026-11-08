@@ -1,0 +1,52 @@
+name: Publish verified Live Chinese v1.6 APK
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-live-chinese-v1.6.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download successfully tested APK from build #42478743352
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified
+          gh run download 42478743352 --repo "${{ github.repository }}" --name LiveChineseOffline-A16-APK --dir verified
+          ls -lah verified
+          test -f verified/LiveChineseOffline-A16.apk
+          test $(wc -c < verified/LiveChineseOffline-A16.apk) -gt 850000000
+
+      - name: Prepare and verify release APK
+        run: |
+          set -euo pipefail
+          mv verified/LiveChineseOffline-A16.apk verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk
+          unzip -t verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk | tail -2
+          unzip -Z1 verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk | grep -q '^assets/qwen/decoder.int8.onnx$'
+          if unzip -Z1 verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk | grep -Eq '^assets/(model|punctuation|secondpass)/'; then echo 'Found unwanted extra model' >&2; exit 1; fi
+          sha256sum verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk
+          du -h verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk
+
+      - name: Publish direct APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.6.0 --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload v1.6.0 verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk --repo "${{ github.repository }}" --clobber
+          else
+            gh release create v1.6.0 verified/LiveChineseOffline-v1.6-Qwen3-ONLY-ARM64.apk \
+              --repo "${{ github.repository }}" \
+              --title "Live Chinese Offline v1.6 - Qwen3 0.6B Only" \
+              --notes "Experimental v1.6 for Android 9+ ARM64. Uses one offline Qwen3-ASR 0.6B INT8 model only, no Paraformer/SenseVoice/CT-Transformer. Mandarin/English audio processed in 2s chunks; 24sp transcript font; simple rule-based Chinese full stops. Android emulator compiled, signed, loaded Qwen and decoded 2 seconds of silent audio and started microphone; does not guarantee 2s word display, 98% accuracy, or compatibility with Samsung A16 5G 4GB RAM. Qwen-only avoids the simultaneous two-model memory burden that caused suspected v1.5 startup crashes." \
+              --target "${{ github.sha }}"
+          fi
+          gh release view v1.6.0 --repo "${{ github.repository }}" --json url,assets
