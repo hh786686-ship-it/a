@@ -1,0 +1,87 @@
+name: MinerU Standard Android ARM64 native dependency port
+on:
+  push:
+    branches: [mineru-standard-arm64-native-port]
+    paths:
+      - '.github/workflows/mineru-arm64-native-port.yml'
+      - 'AndroidFullMinerUProbe/**'
+  workflow_dispatch:
+jobs:
+  llama-cpp-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install NDK and CMake
+        run: sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Cross-compile exact MinerU-pinned llama.cpp for Android ARM64
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --quiet --filter=blob:none https://github.com/ggml-org/llama.cpp.git /tmp/llama.cpp
+          cd /tmp/llama.cpp
+          git checkout --quiet 86a283532072722c5f3363d37d59a874d09fa99b
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          cmake -S . -B /tmp/llama-android-build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_OPENMP=OFF -DGGML_LLAMAFILE=OFF -DGGML_NATIVE=OFF \
+            -DGGML_BACKEND_DL=OFF -DGGML_VULKAN=OFF \
+            -DBUILD_SHARED_LIBS=ON -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF
+          cmake --build /tmp/llama-android-build --parallel 2 --target llama
+          mkdir -p "$GITHUB_WORKSPACE/native-arm64/llama"
+          find /tmp/llama-android-build -type f -name '*.so' -exec cp -v {} "$GITHUB_WORKSPACE/native-arm64/llama/" \;
+          test -n "$(find "$GITHUB_WORKSPACE/native-arm64/llama" -name '*.so' -print -quit)"
+          file "$GITHUB_WORKSPACE"/native-arm64/llama/*.so
+          find "$GITHUB_WORKSPACE/native-arm64/llama" -name '*.so' -exec "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h {} \; | grep -E 'Machine:.*AArch64'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mineru-pinned-llama-cpp-arm64-native
+          path: native-arm64/llama/
+          if-no-files-found: warn
+  docvortex-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install NDK and compile prerequisites
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang cmake pkg-config libclang-dev
+      - name: Build upstream DocVortex Rust Python native extension for Android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --quiet --depth 1 https://github.com/myhloli/DocVortex.git /tmp/docvortex
+          cd /tmp/docvortex
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup target add aarch64-linux-android --toolchain 1.98.1
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android28-clang"
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android28-clang"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          export CMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake"
+          export ANDROID_ABI=arm64-v8a
+          export ANDROID_PLATFORM=android-28
+          cargo +1.98.1 build --release --target aarch64-linux-android -p docvortex-python --lib -j 2
+          mkdir -p "$GITHUB_WORKSPACE/native-arm64/docvortex"
+          find target/aarch64-linux-android/release -maxdepth 1 -type f \( -name '*.so' -o -name '*.a' \) -exec cp -v {} "$GITHUB_WORKSPACE/native-arm64/docvortex/" \;
+          test -n "$(find "$GITHUB_WORKSPACE/native-arm64/docvortex" -type f -print -quit)"
+          file "$GITHUB_WORKSPACE"/native-arm64/docvortex/*
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docvortex-arm64-native-build
+          path: native-arm64/docvortex/
+          if-no-files-found: warn
