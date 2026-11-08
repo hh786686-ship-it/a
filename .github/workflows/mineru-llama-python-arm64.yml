@@ -17,7 +17,13 @@ jobs:
         with:
           packages: platform-tools
       - name: Install Android NDK
-        run: sdkmanager "ndk;27.2.12479018"
+        run: |
+          for attempt in 1 2 3; do
+            if sdkmanager "ndk;27.2.12479018"; then exit 0; fi
+            rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+            sleep 5
+          done
+          exit 1
       - name: Cross-compile exact MinerU Python VLM wrapper with genuine Android Python headers
         run: |
           set -euxo pipefail
