@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/mineru-native-bundle
-          find /tmp/mineru-native-bundle -type f -name '*.so' -exec cp -f {} /tmp/mineru-native-bundle/ \\;
+          find /tmp/llama-android-x86 -type f -name '*.so' -print0 | xargs -0 -r -I '{}' cp -f '{}' /tmp/mineru-native-bundle/
           cp /tmp/mineru-native-smoke /tmp/mineru-native-bundle/mineru-native-smoke
           rm -rf /tmp/llama-android-x86 /tmp/mineru-llama-cpp
           sudo rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
