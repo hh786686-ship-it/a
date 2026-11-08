@@ -44,18 +44,18 @@ jobs:
             -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
             -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TOOLS=ON \
             -DLLAMA_OPENSSL=OFF -DLLAMA_CURL=OFF
-          cmake --build /tmp/llama-android-arm64 --target llama-cli --parallel 3
-          find /tmp/llama-android-arm64 -name 'llama-cli' -o -name 'libllama.so' -o -name 'libggml*.so'
+          cmake --build /tmp/llama-android-arm64 --target llama-app --parallel 3
+          find /tmp/llama-android-arm64 -name 'llama-app' -o -name 'libllama.so' -o -name 'libggml*.so'
       - name: Verify llama engine uses actual ARM64 Android ELF
         run: |
           set -euo pipefail
           mkdir -p /tmp/native-arm64-results
-          CLI="$(find /tmp/llama-android-arm64 -type f -name 'llama-cli' | head -1)"
+          CLI="$(find /tmp/llama-android-arm64 -type f -name 'llama-app' | head -1)"
           test -n "$CLI"
-          file "$CLI" | tee /tmp/native-arm64-results/llama-cli-file.txt
-          llvm-readelf -h "$CLI" | tee /tmp/native-arm64-results/llama-cli-elf.txt
+          file "$CLI" | tee /tmp/native-arm64-results/llama-app-file.txt
+          readelf -h "$CLI" | tee /tmp/native-arm64-results/llama-app-elf.txt
           grep -q 'AArch64' /tmp/native-arm64-results/llama-cli-elf.txt
-          cp "$CLI" /tmp/native-arm64-results/llama-cli
+          cp "$CLI" /tmp/native-arm64-results/llama-app
       - name: Compile DocVortex Rust core for Android ARM64
         run: |
           set -euo pipefail
