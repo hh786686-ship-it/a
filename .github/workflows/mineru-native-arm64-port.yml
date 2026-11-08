@@ -54,7 +54,7 @@ jobs:
           test -n "$CLI"
           file "$CLI" | tee /tmp/native-arm64-results/libllama-file.txt
           readelf -h "$CLI" | tee /tmp/native-arm64-results/libllama-elf.txt
-          grep -q 'AArch64' /tmp/native-arm64-results/llama-cli-elf.txt
+          grep -q 'AArch64' /tmp/native-arm64-results/libllama-elf.txt
           cp "$CLI" /tmp/native-arm64-results/libllama.so
       - name: Compile DocVortex Rust core for Android ARM64
         run: |
