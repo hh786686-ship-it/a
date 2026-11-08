@@ -1,0 +1,96 @@
+name: Cross-compile MinerU Standard missing native components for Android ARM64
+on:
+  workflow_dispatch:
+  push:
+    branches: [mineru-native-android-experimental]
+    paths:
+      - '.github/workflows/mineru-native-arm64-port.yml'
+      - 'AndroidFullMinerUProbe/native/**'
+concurrency:
+  group: mineru-native-arm64-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-port:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android NDK and CMake
+        run: sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Set up host tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ninja-build cmake clang pkg-config git
+          rustup target add aarch64-linux-android
+      - name: Clone full upstream native dependencies
+        run: |
+          git clone --depth=1 --recurse-submodules https://github.com/opendatalab/mineru-llama-cpp.git /tmp/mineru-llama-cpp
+          git -C /tmp/mineru-llama-cpp submodule update --init --recursive --depth=1
+          test -f /tmp/mineru-llama-cpp/third_party/llama.cpp/CMakeLists.txt
+          git clone --depth=1 https://github.com/myhloli/docvortex.git /tmp/docvortex
+          test -f /tmp/docvortex/rust/docvortex-python/Cargo.toml
+      - name: Compile actual MinerU llama.cpp engine for Android ARM64 CPU
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          cmake -S /tmp/mineru-llama-cpp/third_party/llama.cpp -B /tmp/llama-android-arm64 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
+            -DGGML_BACKEND_DL=OFF -DGGML_VULKAN=OFF \
+            -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_OPENSSL=OFF -DLLAMA_CURL=OFF
+          cmake --build /tmp/llama-android-arm64 --target llama-cli --parallel 3
+          find /tmp/llama-android-arm64 -name 'llama-cli' -o -name 'libllama.so' -o -name 'libggml*.so'
+      - name: Verify llama engine uses actual ARM64 Android ELF
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/native-arm64-results
+          CLI="$(find /tmp/llama-android-arm64 -type f -name 'llama-cli' | head -1)"
+          test -n "$CLI"
+          file "$CLI" | tee /tmp/native-arm64-results/llama-cli-file.txt
+          llvm-readelf -h "$CLI" | tee /tmp/native-arm64-results/llama-cli-elf.txt
+          grep -q 'AArch64' /tmp/native-arm64-results/llama-cli-elf.txt
+          cp "$CLI" /tmp/native-arm64-results/llama-cli
+      - name: Compile DocVortex Rust core for Android ARM64
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android26-clang"
+          export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
+          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+          cd /tmp/docvortex
+          cargo build -p docvortex-core --target aarch64-linux-android --release
+          echo 'DocVortex Rust core ARM64 cross-compiled successfully' | tee /tmp/native-arm64-results/docvortex-core.txt
+      - name: Attempt DocVortex CPython extension cross-compile for Android ARM64
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android26-clang"
+          export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
+          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+          export PYO3_CROSS=1
+          export PYO3_CROSS_PYTHON_VERSION=3.12
+          export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+          cd /tmp/docvortex
+          cargo build -p docvortex-python --target aarch64-linux-android --release 2>&1 | tee /tmp/native-arm64-results/docvortex-python.log
+          cp target/aarch64-linux-android/release/lib_native.so /tmp/native-arm64-results/libdocvortex_native.so
+      - name: Explain what has and has not been proven
+        if: always()
+        run: |
+          echo 'Native ARM64 cross-compilation is not equivalent to a working MinerU Standard APK.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Without actual arm64 Android hardware, native runtime loading and VLM generation cannot yet be certified.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The exact MinerU C++ Python binding, DocVortex Python interface and full model weights still require integration.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MinerU-Standard-Android-ARM64-native-compile-evidence
+          path: /tmp/native-arm64-results/
+          if-no-files-found: warn
