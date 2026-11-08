@@ -1,0 +1,54 @@
+name: MinerU llama.cpp Python extension Android ARM64 cross-build
+on:
+  push:
+    branches: [mineru-standard-arm64-native-port]
+    paths: ['.github/workflows/mineru-llama-python-arm64.yml']
+  workflow_dispatch:
+jobs:
+  extension-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.2.12479018"
+      - name: Cross-compile exact MinerU Python VLM wrapper with genuine Android Python headers
+        run: |
+          set -euxo pipefail
+          git clone --quiet --recurse-submodules --shallow-submodules --depth 1 https://github.com/opendatalab/mineru-llama-cpp.git /tmp/mineru-llama-cpp
+          cd /tmp/mineru-llama-cpp
+          git -C third_party/llama.cpp rev-parse HEAD
+          mkdir -p /tmp/chaquo-android
+          V=3.11.17-0
+          curl --retry 3 -fL -o /tmp/chaquo-android/python.zip "https://repo.maven.apache.org/maven2/com/chaquo/python/target/$V/target-$V-arm64-v8a.zip"
+          unzip -q /tmp/chaquo-android/python.zip -d /tmp/chaquo-android
+          # Cross-configure the C API bindings without trying to run Android Python on Linux.
+          sed -i 's/Interpreter Development.SABIModule/Development.SABIModule/' src/cpp/CMakeLists.txt
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          cmake -S . -B /tmp/mineru-llama-arm64 -G Ninja \
+             -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DPython_INCLUDE_DIR=/tmp/chaquo-android/include/python3.11 \
+             -DPython_LIBRARY=/tmp/chaquo-android/jniLibs/arm64-v8a/libpython3.11.so \
+             -DPython_SABI_LIBRARY=/tmp/chaquo-android/jniLibs/arm64-v8a/libpython3.11.so \
+             -DGGML_OPENMP=OFF -DGGML_VULKAN=OFF -DGGML_LLAMAFILE=OFF
+          cmake --build /tmp/mineru-llama-arm64 -j 2 --target _mineru_llama_cpp
+          mkdir -p "$GITHUB_WORKSPACE/native-arm64/mineru-llama-python"
+          find /tmp/mineru-llama-arm64 -type f -name '*mineru_llama_cpp*.so' -exec cp -v {} "$GITHUB_WORKSPACE/native-arm64/mineru-llama-python/" \;
+          test -n "$(find "$GITHUB_WORKSPACE/native-arm64/mineru-llama-python" -type f -print -quit)"
+          for f in "$GITHUB_WORKSPACE"/native-arm64/mineru-llama-python/*; do
+            "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$f" | grep 'Machine:.*AArch64'
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MinerU-llama-Python-extension-Android-arm64
+          path: native-arm64/mineru-llama-python/
+          if-no-files-found: warn
