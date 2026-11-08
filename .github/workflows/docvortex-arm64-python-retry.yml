@@ -1,0 +1,67 @@
+name: DocVortex Android ARM64 CPython ABI retry
+on:
+  push:
+    branches: [mineru-standard-arm64-native-port]
+    paths:
+      - '.github/workflows/docvortex-arm64-python-retry.yml'
+  workflow_dispatch:
+jobs:
+  docvortex-python-arm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.2.12479018"
+      - name: Obtain matching real Android CPython 3.11 shared library
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/chaquo-python /tmp/chaquo-python/lib
+          python3 - <<'PY'
+          import urllib.request,xml.etree.ElementTree as ET
+          root='https://repo.maven.apache.org/maven2/com/chaquo/python/target/'
+          xml=ET.fromstring(urllib.request.urlopen(root+'maven-metadata.xml',timeout=40).read())
+          versions=[x.text for x in xml.findall('.//version') if x.text.startswith('3.11.')]
+          assert versions, 'No Chaquopy Android Python 3.11 runtime found'
+          from packaging.version import Version
+          version=max(versions,key=lambda s: Version(s.replace('-','+')))
+          print('SELECTED_CHAQUOPY_PYTHON',version)
+          with open('/tmp/chaquo-version.txt','w') as f:f.write(version)
+          PY
+          V=$(cat /tmp/chaquo-version.txt)
+          curl -fL --retry 3 -o /tmp/chaquo-python/target.zip "https://repo.maven.apache.org/maven2/com/chaquo/python/target/$V/target-$V-arm64-v8a.zip"
+          unzip -l /tmp/chaquo-python/target.zip | grep -E 'libpython3.11.so|include/python3.11'
+          unzip -q /tmp/chaquo-python/target.zip -d /tmp/chaquo-python
+          cp /tmp/chaquo-python/jniLibs/arm64-v8a/libpython3.11.so /tmp/chaquo-python/lib/
+      - name: Compile actual DocVortex Rust extension with Android Python linker
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --quiet https://github.com/myhloli/DocVortex.git /tmp/docvortex
+          cd /tmp/docvortex
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup target add aarch64-linux-android --toolchain 1.98.1
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android28-clang"
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android28-clang"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          export LIBRARY_PATH=/tmp/chaquo-python/lib
+          export PYO3_CROSS=1
+          export PYO3_CROSS_PYTHON_VERSION=3.11
+          export PYO3_CROSS_LIB_DIR=/tmp/chaquo-python/lib
+          cargo +1.98.1 build --release --target aarch64-linux-android -p docvortex-python --lib -j 2
+          mkdir -p "$GITHUB_WORKSPACE/native-arm64/docvortex"
+          cp target/aarch64-linux-android/release/lib_native.so "$GITHUB_WORKSPACE/native-arm64/docvortex/_native.so"
+          "$BIN/llvm-readelf" -h "$GITHUB_WORKSPACE/native-arm64/docvortex/_native.so" | grep 'Machine:.*AArch64'
+          "$BIN/llvm-readelf" -d "$GITHUB_WORKSPACE/native-arm64/docvortex/_native.so" | grep -E 'NEEDED|SONAME'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docvortex-android-arm64-python-native
+          path: native-arm64/docvortex/
+          if-no-files-found: warn
