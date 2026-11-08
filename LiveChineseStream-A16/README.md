@@ -27,3 +27,6 @@ SenseVoice has been removed entirely. Mandarin/English streaming Paraformer is u
 
 ## v1.5 Qwen3-ASR correction (experimental)
 Bundles the 0.6B INT8 Qwen3-ASR ONNX model (conv frontend, encoder, decoder, tokenizer). It runs after Paraformer commits a short speech segment, using queued background inference; speech still appears immediately from Paraformer. The first pass, punctuation-only fallback, and Mandarin/English restriction stay enabled. The APK is substantially larger and may exhaust RAM on lower-end phones. Qwen correction speed and accuracy on Galaxy A16 5G are not independently measured. Built-in CI checks validate model loading; an emulator is not a replacement for physical device timing.
+
+## v1.6: Qwen3-only mode
+Removed all other ASR and neural punctuation models from this build. It uses Qwen3-ASR 0.6B INT8 for offline Mandarin/English speech recognition, with 2-second chunks and lightweight rule-based punctuation. Text can only appear after each chunk and its processing delay. It is not guaranteed to respond in 2 seconds, nor to avoid memory crashes on a physical A16. CI tests verify native Qwen decoding on 2 seconds of silence and Android microphone startup.
