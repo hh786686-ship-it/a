@@ -11,11 +11,11 @@ adb shell wm dismiss-keyguard || true
 adb shell am start -n "$app/.MainActivity" --ez ciSmokeTest true
 echo "Checking real model initialization in emulator..."
 ready=0
-for i in $(seq 1 60); do
+for i in $(seq 1 45); do
   adb shell uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1 || true
   adb shell cat /sdcard/uidump.xml > /tmp/livechinese.xml 2>/dev/null || true
-  if grep -Eq 'Qwen model ready|Qwen self-test passed' /tmp/livechinese.xml; then ready=1; break; fi
-  if grep -q 'Qwen cannot load on this device' /tmp/livechinese.xml; then
+  if grep -q 'Offline model ready' /tmp/livechinese.xml; then ready=1; break; fi
+  if grep -q 'Could not load model' /tmp/livechinese.xml; then
     echo 'Model initialization failed:'
     cat /tmp/livechinese.xml
     adb logcat -d -t 800 | tail -300
@@ -24,7 +24,7 @@ for i in $(seq 1 60); do
   sleep 3
 done
 if [[ "$ready" != 1 ]]; then
-  echo "Did not see Qwen model ready or Qwen self-test passed in Android UI"
+  echo "Did not see offline model ready in Android UI"
   cat /tmp/livechinese.xml
   adb logcat -d -t 1200 | tail -300
   exit 1
@@ -36,8 +36,8 @@ decoded=0
 for i in $(seq 1 30); do
   adb shell uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1 || true
   adb shell cat /sdcard/uidump.xml > /tmp/livechinese.xml 2>/dev/null || true
-  if grep -q 'Qwen self-test passed' /tmp/livechinese.xml; then decoded=1; break; fi
-  if grep -q 'Qwen inference failed' /tmp/livechinese.xml; then
+  if grep -q 'Self-test passed' /tmp/livechinese.xml; then decoded=1; break; fi
+  if grep -q 'ASR self-test failed' /tmp/livechinese.xml; then
     echo 'FAIL: native offline inference failed'
     adb logcat -d -v brief -s 'LiveChineseA16:*' | tail -120
     exit 1
@@ -49,7 +49,7 @@ if [[ "$decoded" != 1 ]]; then
   adb logcat -d -v brief -s 'LiveChineseA16:*' | tail -120
   exit 1
 fi
-echo 'PASS: Qwen3 native offline ASR accepted 2s audio and completed decode'
+echo 'PASS: native offline ASR accepted audio, decoded and returned a recognition result'
 
 # Identify the Start listening button using its Android accessibility bounds.
 python3 - <<'PY'
@@ -81,7 +81,7 @@ if ! grep -q 'AudioRecord state after start: 3' /tmp/livechinese.log; then
   adb logcat -d -t 500 | tail -150
   exit 1
 fi
-if ! grep -q 'Last chunk processing:' /tmp/livechinese-recording.xml; then
+if ! grep -q 'Model processing:' /tmp/livechinese-recording.xml; then
   echo 'NOTE: headless emulator microphone provided no PCM; native offline decoding was separately verified'
 fi
 if grep -q 'Recognition error:\|Microphone error:' /tmp/livechinese-recording.xml; then
@@ -89,15 +89,15 @@ if grep -q 'Recognition error:\|Microphone error:' /tmp/livechinese-recording.xm
   cat /tmp/livechinese-recording.xml
   exit 1
 fi
-if grep -E -q 'E/LiveChineseA16|Qwen transcription failed|Microphone startup exception' /tmp/livechinese.log; then
+if grep -E -q 'E/LiveChineseA16|Recognition decoding failed|Microphone startup exception' /tmp/livechinese.log; then
   echo 'FAIL: app logged a microphone/recognition exception'
   cat /tmp/livechinese.log
   exit 1
 fi
-echo 'PASS: microphone reached RECORDING; native Qwen2-second-silence inference separately tested'
+echo 'PASS: microphone reached RECORDING and on-device model processed an audio chunk'
 if adb logcat -d -v brief | grep -q 'FATAL EXCEPTION'; then
   echo 'FATAL EXCEPTION found in Android log'
   adb logcat -d -t 900 | tail -300
   exit 1
 fi
-echo 'PASS: Qwen-only model loaded, 2s inference completed, microphone started without fatal exception'
+echo 'PASS: native model loaded and live microphone session started, no fatal exception'

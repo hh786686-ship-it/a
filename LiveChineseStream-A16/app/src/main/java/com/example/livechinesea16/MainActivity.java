@@ -25,356 +25,434 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.k2fsa.sherpa.onnx.EndpointConfig;
+import com.k2fsa.sherpa.onnx.EndpointRule;
+import com.k2fsa.sherpa.onnx.FeatureConfig;
+import com.k2fsa.sherpa.onnx.OnlineModelConfig;
+import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig;
+import com.k2fsa.sherpa.onnx.OnlineRecognizer;
+import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig;
+import com.k2fsa.sherpa.onnx.OnlineStream;
+
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-/**
- * Single-model Mandarin / English transcription with Qwen3-ASR 0.6B INT8.
- * Audio arrives continuously but transcription updates after completed chunks,
- * not word-by-word. No Paraformer, SenseVoice, or neural punctuation model.
- */
+
 public final class MainActivity extends Activity {
-    private static final String TAG = "LiveChineseA16";
     private static final int SAMPLE_RATE = 16000;
-    private static final int PERMISSION_REQUEST = 42;
-    private static final int SAVE_REQUEST = 43;
-    private static final int CHUNK_SAMPLES = SAMPLE_RATE * 2;
+    private static final String LOG_TAG = "LiveChineseA16";
+    private static final int AUDIO_PERMISSION = 42;
+    private static final int SAVE_DOCUMENT = 43;
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private final Object textLock = new Object();
-    private final AtomicBoolean active = new AtomicBoolean(false);
-    private final ArrayBlockingQueue<float[]> audioQueue = new ArrayBlockingQueue<>(3);
+    private final Object transcriptLock = new Object();
+    private volatile boolean recording = false;
+    private volatile boolean busy = false;
     private volatile boolean modelReady = false;
-    private volatile boolean modelFailed = false;
-    private QwenCorrectionEngine qwen;
-    private AudioRecord audioRecord;
-    private Thread captureThread;
-    private Thread decoderThread;
-    private TextView transcription;
-    private TextView status;
-    private TextView indicator;
-    private Button microphoneButton;
-    private ScrollView scroller;
-    private final StringBuilder completed = new StringBuilder();
-    private long sessionNumber = 0;
+    private OnlineRecognizer recognizer;
+    private AudioRecord microphone;
+    private TextView transcriptView;
+    private TextView stateView;
+    private TextView metricView;
+    private Button recordButton;
+    private ScrollView transcriptScroller;
+    private final ArrayList<TranscriptSegment> committedSegments = new ArrayList<>();
+    private final ExecutorService correctionExecutor = Executors.newSingleThreadExecutor();
+    
+    private int transcriptGeneration = 0;
+    private String partial = "";
+    private long lastUiMs = 0L;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().setStatusBarColor(Color.rgb(14, 24, 39));
         getWindow().setNavigationBarColor(Color.rgb(14, 24, 39));
-        setupUi();
-        setStatus("Loading offline Qwen3-ASR 0.6B…");
-        microphoneButton.setEnabled(false);
-        new Thread(this::loadModel, "qwen-loader").start();
+        makeUi();
+        setStatus("Loading Mandarin streaming Zipformer…");
+        recordButton.setEnabled(false);
+        new Thread(this::loadModel, "model-loader").start();
     }
 
-    private int dp(float value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+    private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
     private TextView label(String value, int size, int color, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return view;
+        TextView t = new TextView(this);
+        t.setText(value);
+        t.setTextSize(size);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return t;
     }
 
-    private Button button(String value) {
-        Button button = new Button(this);
-        button.setText(value);
-        button.setTextSize(15);
-        button.setAllCaps(false);
-        return button;
+    private Button button(String name) {
+        Button b = new Button(this);
+        b.setText(name);
+        b.setAllCaps(false);
+        b.setTextSize(15);
+        return b;
     }
 
-    private void setupUi() {
+    private void makeUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(24), dp(20), dp(16));
         root.setBackgroundColor(Color.rgb(14, 24, 39));
+        root.setPadding(dp(20), dp(24), dp(20), dp(16));
         setContentView(root);
 
-        root.addView(label("Live Chinese", 29, Color.WHITE, true));
-        TextView subtitle = label("Offline • Qwen3-ASR 0.6B only • Mandarin / English",
-                13, Color.rgb(167, 187, 207), false);
-        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
-        subtitleParams.topMargin = dp(5);
-        root.addView(subtitle, subtitleParams);
-
-        status = label("Preparing…", 15, Color.rgb(125, 211, 252), true);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
-        statusParams.topMargin = dp(24);
-        root.addView(status, statusParams);
-
-        indicator = label("2-second audio chunks • Timing depends on phone", 12,
+        TextView title = label("Live Chinese", 29, Color.WHITE, true);
+        root.addView(title);
+        TextView sub = label("100% offline • Mandarin / English", 13,
                 Color.rgb(167, 187, 207), false);
-        LinearLayout.LayoutParams indicatorParams = new LinearLayout.LayoutParams(-1, -2);
-        indicatorParams.topMargin = dp(6);
-        root.addView(indicator, indicatorParams);
+        LinearLayout.LayoutParams subP = new LinearLayout.LayoutParams(-1, -2);
+        subP.topMargin = dp(5);
+        root.addView(sub, subP);
 
-        microphoneButton = button("Start listening");
-        LinearLayout.LayoutParams listenParams = new LinearLayout.LayoutParams(-1, dp(60));
-        listenParams.topMargin = dp(16);
-        root.addView(microphoneButton, listenParams);
-        microphoneButton.setOnClickListener(v -> {
-            if (active.get()) stopListening(); else startListening();
+        stateView = label("Preparing…", 15, Color.rgb(125, 211, 252), true);
+        LinearLayout.LayoutParams stateP = new LinearLayout.LayoutParams(-1, -2);
+        stateP.topMargin = dp(26);
+        root.addView(stateView, stateP);
+        metricView = label("Streaming partial text as you speak", 12,
+                Color.rgb(167, 187, 207), false);
+        LinearLayout.LayoutParams metricP = new LinearLayout.LayoutParams(-1, -2);
+        metricP.topMargin = dp(6);
+        root.addView(metricView, metricP);
+
+        recordButton = button("Start listening");
+        LinearLayout.LayoutParams bP = new LinearLayout.LayoutParams(-1, dp(60));
+        bP.topMargin = dp(17);
+        root.addView(recordButton, bP);
+        recordButton.setOnClickListener(v -> {
+            if (recording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
         });
 
         TextView heading = label("Transcript", 16, Color.WHITE, true);
-        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, -2);
-        headingParams.topMargin = dp(22);
-        headingParams.bottomMargin = dp(9);
-        root.addView(heading, headingParams);
+        LinearLayout.LayoutParams hP = new LinearLayout.LayoutParams(-1, -2);
+        hP.topMargin = dp(22);
+        hP.bottomMargin = dp(9);
+        root.addView(heading, hP);
 
-        scroller = new ScrollView(this);
-        scroller.setFillViewport(true);
-        scroller.setBackgroundColor(Color.rgb(25, 39, 58));
-        transcription = label("Tap Start listening. Qwen transcribes short audio chunks; words do not appear instantly.",
+        transcriptScroller = new ScrollView(this);
+        transcriptScroller.setFillViewport(true);
+        transcriptScroller.setBackgroundColor(Color.rgb(25, 39, 58));
+        transcriptView = label("Tap Start listening and begin speaking. Text will appear before you finish your sentence.",
                 24, Color.rgb(229, 236, 245), false);
-        transcription.setPadding(dp(15), dp(16), dp(15), dp(16));
-        transcription.setTextIsSelectable(true);
-        scroller.addView(transcription);
-        root.addView(scroller, new LinearLayout.LayoutParams(-1, 0, 1f));
+        transcriptView.setPadding(dp(15), dp(16), dp(15), dp(16));
+        transcriptView.setTextIsSelectable(true);
+        transcriptScroller.addView(transcriptView);
+        root.addView(transcriptScroller, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         LinearLayout actions = new LinearLayout(this);
-        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(-1, -2);
-        actionsParams.topMargin = dp(12);
-        root.addView(actions, actionsParams);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams aP = new LinearLayout.LayoutParams(-1, -2);
+        aP.topMargin = dp(12);
+        root.addView(actions, aP);
         Button copy = button("Copy");
         Button save = button("Save .txt");
         Button clear = button("Clear");
         actions.addView(copy, new LinearLayout.LayoutParams(0, dp(56), 1f));
         actions.addView(save, new LinearLayout.LayoutParams(0, dp(56), 1.25f));
         actions.addView(clear, new LinearLayout.LayoutParams(0, dp(56), 1f));
-
         copy.setOnClickListener(v -> {
-            ClipboardManager clipboard = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText("Chinese transcript", transcript()));
+            String text = transcript();
+            ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            cb.setPrimaryClip(ClipData.newPlainText("Chinese transcript", text));
             toast("Copied");
         });
         save.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_TITLE, "live-chinese-transcript.txt");
-            startActivityForResult(intent, SAVE_REQUEST);
+            Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("text/plain");
+            i.putExtra(Intent.EXTRA_TITLE, "live-chinese-transcript.txt");
+            startActivityForResult(i, SAVE_DOCUMENT);
         });
         clear.setOnClickListener(v -> {
-            synchronized (textLock) { completed.setLength(0); }
-            draw();
+            synchronized (transcriptLock) { committedSegments.clear(); partial = ""; transcriptGeneration++; }
+            drawTranscript();
         });
-        TextView footer = label("No Google speech service • No internet permission",
+
+        TextView footer = label("No Google speech service • No internet permission • Runs on device",
                 11, Color.rgb(148, 163, 184), false);
         footer.setGravity(Gravity.CENTER_HORIZONTAL);
-        LinearLayout.LayoutParams footerParams = new LinearLayout.LayoutParams(-1, -2);
-        footerParams.topMargin = dp(12);
-        root.addView(footer, footerParams);
+        LinearLayout.LayoutParams fP = new LinearLayout.LayoutParams(-1, -2);
+        fP.topMargin = dp(12);
+        root.addView(footer, fP);
     }
 
     private void loadModel() {
         try {
-            qwen = new QwenCorrectionEngine(this);
+            OnlineTransducerModelConfig p = new OnlineTransducerModelConfig();
+            p.setEncoder("model/encoder.int8.onnx");
+            p.setDecoder("model/decoder.onnx");
+            p.setJoiner("model/joiner.int8.onnx");
+            OnlineModelConfig config = new OnlineModelConfig();
+            config.setTransducer(p);
+            config.setTokens("model/tokens.txt");
+            config.setNumThreads(2);
+            config.setProvider("cpu");
+            config.setModelType("zipformer2");
+            config.setModelingUnit("bpe");
+            config.setBpeVocab("model/bpe.model");
+            OnlineRecognizerConfig c = new OnlineRecognizerConfig();
+            c.setFeatConfig(new FeatureConfig(SAMPLE_RATE, 80, 0.0f));
+            c.setModelConfig(config);
+            // Commit after a short pause, but show partial results continually.
+            c.setEndpointConfig(new EndpointConfig(
+                    new EndpointRule(false, 1.6f, 0f),
+                    new EndpointRule(true, 0.8f, 0f),
+                    new EndpointRule(false, 0f, 18f)));
+            c.setEnableEndpoint(true);
+
+            recognizer = new OnlineRecognizer(getAssets(), c);
+            ui.post(() -> setStatus("Zipformer streaming model loaded"));
             modelReady = true;
-            modelFailed = false;
-            Log.i(TAG, "Qwen3-ASR 0.6B single model loaded");
-            ui.post(() -> {
-                setStatus("Qwen model ready");
-                microphoneButton.setEnabled(true);
-                indicator.setText("Qwen only • 2-second audio chunks • ，。");
-            });
+            // CI-only native inference check. The installed phone app never runs this
+            // unless explicitly launched with the ciSmokeTest intent extra.
             if (getIntent().getBooleanExtra("ciSmokeTest", false)) {
-                Thread test = new Thread(this::runSelfTest, "qwen-self-test");
-                test.start();
+                new Thread(this::runOfflineSelfTest, "offline-selftest").start();
             }
-        } catch (Throwable error) {
-            modelFailed = true;
-            Log.e(TAG, "Qwen model could not load", error);
+
             ui.post(() -> {
-                setStatus("Qwen cannot load on this device");
-                indicator.setText(error.getClass().getSimpleName() + ": " + error.getMessage());
-                microphoneButton.setEnabled(false);
+                setStatus("Offline model ready");
+                metricView.setText("Mandarin-only genuine streaming Zipformer • Offline • ，。");
+                recordButton.setEnabled(true);
+            });
+        } catch (Throwable e) {
+            ui.post(() -> {
+                setStatus("Could not load model");
+                metricView.setText(e.getClass().getSimpleName() + ": " + e.getMessage());
+                recordButton.setEnabled(false);
             });
         }
     }
 
-    private void runSelfTest() {
+
+    private void runOfflineSelfTest() {
+        OnlineStream stream = null;
         try {
-            long start = SystemClock.elapsedRealtime();
-            String result = qwen.recognize(new float[SAMPLE_RATE * 2]);
-            long took = SystemClock.elapsedRealtime() - start;
-            Log.i(TAG, "Qwen-only native inference passed: " + took + " ms; output=" + result);
-            ui.post(() -> setStatus("Qwen self-test passed • Ready"));
-        } catch (Throwable error) {
-            Log.e(TAG, "Qwen-only inference failed", error);
-            ui.post(() -> setStatus("Qwen inference failed: " + error.getClass().getSimpleName()));
+            stream = recognizer.createStream("");
+            float[] silentBlock = new float[1600]; // 100 ms at 16 kHz
+            int decoded = 0;
+            for (int i = 0; i < 60; i++) {
+                stream.acceptWaveform(silentBlock, SAMPLE_RATE);
+                while (recognizer.isReady(stream)) {
+                    recognizer.decode(stream);
+                    decoded++;
+                }
+            }
+            stream.inputFinished();
+            while (recognizer.isReady(stream)) {
+                recognizer.decode(stream);
+                decoded++;
+            }
+            recognizer.getResult(stream);
+            if (decoded < 1) throw new IllegalStateException("Native recognizer decoded no audio frames");
+            Log.i(LOG_TAG, "ASR silent self-test passed, decoded=" + decoded);
+            ui.post(() -> setStatus("Offline model ready · Self-test passed"));
+        } catch (Throwable err) {
+            Log.e(LOG_TAG, "ASR self-test failed", err);
+            ui.post(() -> setStatus("ASR self-test failed: " + err.getMessage()));
+        } finally {
+            if (stream != null) try { stream.release(); } catch (Throwable ignored) {}
         }
     }
 
-    private void startListening() {
-        if (!modelReady || active.get()) return;
+    private void startRecording() {
+        if (!modelReady || busy) return;
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST);
+            requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, AUDIO_PERMISSION);
             return;
         }
         int min = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT);
-        if (min <= 0) { setStatus("16 kHz microphone unavailable"); return; }
+        if (min < 0) { setStatus("16 kHz microphone not supported"); return; }
+        // Enough buffering to absorb occasional slow CPU inference on A16 5G.
+        int capacity = Math.max(min * 2, SAMPLE_RATE * 2 * 3);
         try {
-            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(min * 2, SAMPLE_RATE * 2 * 2));
-            if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                audioRecord.release();
-                setStatus("Microphone could not start");
+            microphone = new AudioRecord(MediaRecorder.AudioSource.MIC,
+                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT, capacity);
+            if (microphone.getState() != AudioRecord.STATE_INITIALIZED) {
+                microphone.release();
+                setStatus("Microphone initialization failed");
+                Log.e(LOG_TAG, "AudioRecord not initialized");
                 return;
             }
-            audioQueue.clear();
-            audioRecord.startRecording();
-            Log.i(TAG, "AudioRecord state after start: " + audioRecord.getRecordingState());
-            active.set(true);
-            sessionNumber++;
-            final long session = sessionNumber;
-            microphoneButton.setText("Stop and finish");
-            setStatus("● Listening • transcribing short chunks");
+            microphone.startRecording();
+            Log.i(LOG_TAG, "AudioRecord state after start: " + microphone.getRecordingState());
+            recording = true;
+            busy = true;
+            recordButton.setText("Stop and finish");
+            setStatus("● Listening live");
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            decoderThread = new Thread(() -> decodeLoop(session), "qwen-decode");
-            captureThread = new Thread(this::captureLoop, "qwen-capture");
-            decoderThread.start();
-            captureThread.start();
+            final AudioRecord current = microphone;
+            new Thread(() -> decodeLoop(current), "live-recognizer").start();
         } catch (Throwable e) {
-            Log.e(TAG, "Microphone startup exception", e);
-            setStatus("Microphone error: " + e.getClass().getSimpleName());
+            setStatus("Microphone error: " + e.getMessage());
+            Log.e(LOG_TAG, "Microphone startup exception", e);
+            if (microphone != null) { try { microphone.release(); } catch (Throwable ignored) {} }
+            microphone = null;
+            recording = false;
+            busy = false;
         }
     }
 
-    private void stopListening() {
-        active.set(false);
-        microphoneButton.setText("Start listening");
-        setStatus("Finishing recorded audio…");
+    private void stopRecording() {
+        recording = false;
+        recordButton.setEnabled(false);
+        setStatus("Finishing last words…");
+        // The AudioRecord will be closed by the worker after the active read.
     }
 
-    private void captureLoop() {
-        short[] pcm = new short[1600];
-        float[] chunk = new float[CHUNK_SAMPLES];
-        int used = 0;
+    private void decodeLoop(AudioRecord audio) {
+        OnlineStream stream = null;
         try {
-            while (active.get()) {
-                int n = audioRecord.read(pcm, 0, pcm.length);
-                if (n == AudioRecord.ERROR_DEAD_OBJECT) break;
-                if (n <= 0) continue;
-                for (int i = 0; i < n; i++) {
-                    chunk[used++] = pcm[i] / 32768.0f;
-                    if (used == CHUNK_SAMPLES) {
-                        enqueue(chunk);
-                        chunk = new float[CHUNK_SAMPLES];
-                        used = 0;
-                    }
+            stream = recognizer.createStream("");
+            short[] pcm16 = new short[1600]; // 100 ms chunks
+            while (recording) {
+                int size = audio.read(pcm16, 0, pcm16.length);
+                if (size == AudioRecord.ERROR_DEAD_OBJECT) throw new IllegalStateException("Microphone disconnected");
+                if (size <= 0) continue;
+                float[] pcm = new float[size];
+                for (int i = 0; i < size; i++) pcm[i] = pcm16[i] / 32768.0f;
+                long begin = SystemClock.elapsedRealtime();
+                stream.acceptWaveform(pcm, SAMPLE_RATE);
+                while (recognizer.isReady(stream)) recognizer.decode(stream);
+                boolean endpoint = recognizer.isEndpoint(stream);
+                String current = recognizer.getResult(stream).getText().trim();
+                if (endpoint) {
+                    // Lookahead flush for Paraformer, only at short pauses.
+                    stream.acceptWaveform(new float[SAMPLE_RATE / 2], SAMPLE_RATE);
+                    while (recognizer.isReady(stream)) recognizer.decode(stream);
+                    current = recognizer.getResult(stream).getText().trim();
+                    queueCorrection(current);
+                    recognizer.reset(stream);
+                } else {
+                    synchronized (transcriptLock) { partial = current; }
+                }
+                long elapsed = SystemClock.elapsedRealtime() - begin;
+                long now = SystemClock.elapsedRealtime();
+                if (now - lastUiMs >= 120 || endpoint) {
+                    lastUiMs = now;
+                    final long decodeMs = elapsed;
+                    ui.post(() -> {
+                        drawTranscript();
+                        metricView.setText("Model processing: " + decodeMs + " ms / 100 ms audio chunk (not end-to-end delay)");
+                    });
                 }
             }
-            if (used >= SAMPLE_RATE / 4) {
-                float[] tail = new float[used];
-                System.arraycopy(chunk, 0, tail, 0, used);
-                enqueue(tail);
-            }
-        } catch (Throwable error) {
-            Log.e(TAG, "Microphone read failed", error);
-            ui.post(() -> setStatus("Microphone read error"));
+            stream.inputFinished();
+            while (recognizer.isReady(stream)) recognizer.decode(stream);
+            String tail = recognizer.getResult(stream).getText().trim();
+            queueCorrection(tail);
+        } catch (Throwable e) {
+            Log.e(LOG_TAG, "Recognition decoding failed", e);
+            ui.post(() -> { setStatus("Recognition error: " + e.getMessage()); toast("Transcription stopped"); });
         } finally {
-            active.set(false);
-            try { audioRecord.stop(); } catch (Throwable ignored) {}
-            try { audioRecord.release(); } catch (Throwable ignored) {}
-        }
-    }
-
-    private void enqueue(float[] chunk) {
-        if (!audioQueue.offer(chunk)) {
-            // Backpressure is visible rather than silently losing recorded speech.
-            Log.w(TAG, "Qwen decode queue saturated; transcription falling behind");
-            ui.post(() -> indicator.setText("Phone is slower than recording • audio queue full"));
-            try { audioQueue.put(chunk); }
-            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        }
-    }
-
-    private void decodeLoop(long session) {
-        try {
-            while (active.get() || !audioQueue.isEmpty()
-                    || (captureThread != null && captureThread.isAlive())) {
-                float[] speech = audioQueue.poll(300, java.util.concurrent.TimeUnit.MILLISECONDS);
-                if (speech == null) continue;
-                long started = SystemClock.elapsedRealtime();
-                String result = qwen.recognize(speech);
-                long elapsed = SystemClock.elapsedRealtime() - started;
-                Log.i(TAG, "Qwen-only chunk decoded: " + elapsed + "ms / "
-                        + (speech.length / (float)SAMPLE_RATE) + "s audio");
-                if (result != null && !result.trim().isEmpty()) {
-                    synchronized (textLock) {
-                        if (session == sessionNumber) {
-                            if (completed.length() > 0) completed.append("\n");
-                            completed.append(endPunctuation(result.trim()));
-                        }
-                    }
-                    ui.post(this::draw);
-                }
-                ui.post(() -> indicator.setText("Last chunk processing: " + elapsed
-                        + " ms (not end-to-end delay)"));
-            }
-        } catch (Throwable error) {
-            Log.e(TAG, "Qwen transcription failed", error);
-            ui.post(() -> setStatus("Qwen transcription failed: " + error.getClass().getSimpleName()));
-        } finally {
+            try { audio.stop(); } catch (Throwable ignored) {}
+            try { audio.release(); } catch (Throwable ignored) {}
+            if (stream != null) try { stream.release(); } catch (Throwable ignored) {}
+            recording = false;
+            busy = false;
             ui.post(() -> {
-                microphoneButton.setText("Start listening");
-                setStatus("Ready • Transcript retained");
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                recordButton.setText("Start listening");
+                recordButton.setEnabled(modelReady);
+                setStatus("Ready • Transcript retained on screen");
+                drawTranscript();
             });
         }
     }
 
-    private String endPunctuation(String text) {
-        String s = text.trim().replaceAll("\\s+", " ")
-                .replaceAll("(?<=[\\p{IsHan}]) +(?=[\\p{IsHan}])", "");
-        if (s.isEmpty() || s.matches(".*[。！？.!?]$")) return s;
-        return s.codePoints().anyMatch(cp ->
-                Character.UnicodeScript.of(cp) == Character.UnicodeScript.HAN) ? s + "。" : s + ".";
+    private static final class TranscriptSegment {
+        String text;
+        TranscriptSegment(String text) { this.text = text; }
+    }
+
+    private void queueCorrection(String firstPass) {
+        if (firstPass == null || firstPass.trim().isEmpty()) {
+            synchronized (transcriptLock) { partial = ""; }
+            return;
+        }
+        final TranscriptSegment slot;
+        final int generation;
+        synchronized (transcriptLock) {
+            // Immediately display the segment with the requested Chinese full stop.
+            slot = new TranscriptSegment(AccuracyEngine.ensureSentenceEnd(firstPass));
+            committedSegments.add(slot);
+            partial = "";
+            generation = transcriptGeneration;
+        }
+        ui.post(this::drawTranscript);
+        correctionExecutor.execute(() -> {
+            try {
+                // Punctuation alone, no SenseVoice second-pass ASR model.
+                String punctuated = AccuracyEngine.ensureSentenceEnd(firstPass);
+                synchronized (transcriptLock) {
+                    if (generation != transcriptGeneration || !committedSegments.contains(slot)) return;
+                    slot.text = punctuated;
+                }
+                ui.post(this::drawTranscript);
+            } catch (Throwable err) {
+                Log.e(LOG_TAG, "Punctuation failed; keeping basic full stop", err);
+            }
+        });
     }
 
     private String transcript() {
-        synchronized (textLock) { return completed.toString(); }
+        synchronized (transcriptLock) {
+            StringBuilder text = new StringBuilder();
+            for (TranscriptSegment segment : committedSegments) {
+                if (segment.text.isEmpty()) continue;
+                if (text.length() > 0) text.append("\n");
+                text.append(segment.text);
+            }
+            if (!partial.isEmpty()) {
+                if (text.length() > 0) text.append("\n");
+                text.append(partial);
+            }
+            return text.toString();
+        }
     }
 
-    private void draw() {
-        String text = transcript();
-        transcription.setText(text.isEmpty() ? "Listening for speech…" : text);
-        scroller.post(() -> scroller.fullScroll(View.FOCUS_DOWN));
+    private void drawTranscript() {
+        String txt = transcript();
+        transcriptView.setText(txt.isEmpty() ? "Listening for speech…" : txt);
+        transcriptScroller.post(() -> transcriptScroller.fullScroll(View.FOCUS_DOWN));
     }
 
-    private void setStatus(String value) { status.setText(value); }
-    private void toast(String msg) { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show(); }
+    private void setStatus(String s) { stateView.setText(s); }
+    private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
 
-    @Override public void onRequestPermissionsResult(int request, String[] p, int[] granted) {
-        super.onRequestPermissionsResult(request, p, granted);
-        if (request == PERMISSION_REQUEST) {
-            if (granted.length > 0 && granted[0] == PackageManager.PERMISSION_GRANTED) startListening();
+    @Override public void onRequestPermissionsResult(int request, String[] perms, int[] grants) {
+        super.onRequestPermissionsResult(request, perms, grants);
+        if (request == AUDIO_PERMISSION) {
+            if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) startRecording();
             else toast("Microphone permission is required");
         }
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request != SAVE_REQUEST || result != RESULT_OK || data == null) return;
-        try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
-            if (out == null) throw new IllegalStateException("Could not write output");
-            out.write(transcript().getBytes(StandardCharsets.UTF_8));
+        if (request != SAVE_DOCUMENT || result != RESULT_OK || data == null) return;
+        try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+            if (output == null) throw new IllegalStateException("Could not open selected file");
+            output.write(transcript().getBytes(StandardCharsets.UTF_8));
             toast("Saved");
-        } catch (Exception e) { toast("Save failed: " + e.getMessage()); }
+        } catch (Exception e) {
+            toast("Save failed: " + e.getMessage());
+        }
     }
 
     @Override protected void onDestroy() {
-        active.set(false);
+        recording = false;
         super.onDestroy();
+        // The recognition worker owns releasing the microphone and stream.
+        // The process owns the native model until the activity is destroyed.
     }
 }

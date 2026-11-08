@@ -10,7 +10,7 @@ on:
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -25,31 +25,27 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
-      - name: Download offline Qwen3-ASR 0.6B INT8 correction model
+      - name: Download verified Mandarin genuine-streaming Zipformer Large INT8 model
         shell: bash
         run: |
           set -euo pipefail
-          base='https://huggingface.co/thieunv/sherpa-onnx-qwen3-asr-0.6B-int8/resolve/main'
-          d='LiveChineseStream-A16/app/src/main/assets/qwen'
-          mkdir -p "$d/tokenizer"
-          for file in conv_frontend.onnx encoder.int8.onnx decoder.int8.onnx; do
-            curl --fail --location --retry 5 --retry-delay 5 -o "$d/$file" "$base/$file"
+          base='https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30/resolve/main'
+          mkdir -p LiveChineseStream-A16/app/src/main/assets/model
+          cd LiveChineseStream-A16/app/src/main/assets/model
+          for file in encoder.int8.onnx decoder.onnx joiner.int8.onnx tokens.txt bpe.model; do
+            curl --fail --location --retry 5 --retry-delay 3 -o "$file" "$base/$file"
           done
-          for file in vocab.json merges.txt tokenizer_config.json; do
-            curl --fail --location --retry 5 --retry-delay 5 -o "$d/tokenizer/$file" "$base/tokenizer/$file"
-          done
-          test $(wc -c < "$d/decoder.int8.onnx") -gt 700000000
-          test $(wc -c < "$d/encoder.int8.onnx") -gt 150000000
-          test $(wc -c < "$d/conv_frontend.onnx") -gt 40000000
-          test $(wc -c < "$d/tokenizer/vocab.json") -gt 2000000
-          du -h "$d"/*
-
+          test $(wc -c < encoder.int8.onnx) -gt 150000000
+          test $(wc -c < decoder.onnx) -gt 4000000
+          test $(wc -c < joiner.int8.onnx) -gt 700000
+          test $(wc -c < bpe.model) -gt 200000
+          du -h * 
       - name: Build debug APK
         working-directory: LiveChineseStream-A16
         run: gradle --no-daemon --stacktrace assembleDebug
       - name: Preserve ARM64 phone APK
         run: cp LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/LiveChineseOffline-A16.apk"
-      - name: Verify APK integrity and one-model contents
+      - name: Verify APK integrity and manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -57,15 +53,14 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -18
           if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -q 'android.permission.INTERNET'; then
-            echo 'Unexpected network permission' >&2; exit 1
+            echo 'Unexpected network permission' >&2
+            exit 1
           fi
-          unzip -Z1 "$apk" | grep -q '^assets/qwen/decoder.int8.onnx$'
-          unzip -Z1 "$apk" | grep -q '^assets/qwen/encoder.int8.onnx$'
-          unzip -Z1 "$apk" | grep -q '^assets/qwen/conv_frontend.onnx$'
-          if unzip -Z1 "$apk" | grep -Eq '^assets/(model|punctuation|secondpass)/'; then
-            echo 'Unexpected extra ASR/punctuation model present' >&2; exit 1
-          fi
-          unzip -Z1 "$apk" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          unzip -l "$apk" | grep -E 'assets/model/.*(onnx|tokens.txt|bpe.model)'
+          unzip -l "$apk" | grep -q 'assets/model/joiner.int8.onnx'
+          unzip -l "$apk" | grep -q 'assets/model/bpe.model'
+          if unzip -Z1 "$apk" | grep -Eq '^assets/(qwen|secondpass|punctuation)/'; then echo 'Unexpected extra model' >&2; exit 1; fi
+          unzip -l "$apk" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           ls -lh "$apk"
       - name: Build emulator x86_64 smoke-test APK
         working-directory: LiveChineseStream-A16
@@ -101,9 +96,9 @@ jobs:
           api-level: 35
           target: aosp_atd
           arch: x86_64
-          ram-size: 6144M
+          ram-size: 4096M
           heap-size: 768M
-          disk-size: 4G
+          disk-size: 2G
           emulator-options: -no-window -no-snapshot -no-boot-anim -gpu swiftshader_indirect
           script: bash .github/scripts/smoke-live-chinese.sh
 
@@ -112,4 +107,4 @@ jobs:
           name: LiveChineseOffline-A16-APK
           path: ${{ runner.temp }}/LiveChineseOffline-A16.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
