@@ -65,6 +65,7 @@ jobs:
           export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
           export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
           cd /tmp/docvortex
+          rustup target add aarch64-linux-android
           cargo build -p docvortex-core --target aarch64-linux-android --release
           echo 'DocVortex Rust core ARM64 cross-compiled successfully' | tee /tmp/native-arm64-results/docvortex-core.txt
       - name: Attempt DocVortex CPython extension cross-compile for Android ARM64
@@ -80,6 +81,7 @@ jobs:
           export PYO3_CROSS_PYTHON_VERSION=3.12
           export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
           cd /tmp/docvortex
+          rustup target add aarch64-linux-android
           cargo build -p docvortex-python --target aarch64-linux-android --release 2>&1 | tee /tmp/native-arm64-results/docvortex-python.log
           cp target/aarch64-linux-android/release/lib_native.so /tmp/native-arm64-results/libdocvortex_native.so
       - name: Explain what has and has not been proven
