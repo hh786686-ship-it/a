@@ -196,8 +196,6 @@ public final class MainActivity extends Activity {
             config.setNumThreads(2);
             config.setProvider("cpu");
             config.setModelType("zipformer2");
-            config.setModelingUnit("bpe");
-            config.setBpeVocab("model/bpe.model");
             OnlineRecognizerConfig c = new OnlineRecognizerConfig();
             c.setFeatConfig(new FeatureConfig(SAMPLE_RATE, 80, 0.0f));
             c.setModelConfig(config);

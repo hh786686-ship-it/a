@@ -32,13 +32,12 @@ jobs:
           base='https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30/resolve/main'
           mkdir -p LiveChineseStream-A16/app/src/main/assets/model
           cd LiveChineseStream-A16/app/src/main/assets/model
-          for file in encoder.int8.onnx decoder.onnx joiner.int8.onnx tokens.txt bpe.model; do
+          for file in encoder.int8.onnx decoder.onnx joiner.int8.onnx tokens.txt; do
             curl --fail --location --retry 5 --retry-delay 3 -o "$file" "$base/$file"
           done
           test $(wc -c < encoder.int8.onnx) -gt 150000000
           test $(wc -c < decoder.onnx) -gt 4000000
           test $(wc -c < joiner.int8.onnx) -gt 700000
-          test $(wc -c < bpe.model) -gt 200000
           du -h * 
       - name: Build debug APK
         working-directory: LiveChineseStream-A16
@@ -58,7 +57,6 @@ jobs:
           fi
           unzip -l "$apk" | grep -E 'assets/model/.*(onnx|tokens.txt|bpe.model)'
           unzip -l "$apk" | grep -q 'assets/model/joiner.int8.onnx'
-          unzip -l "$apk" | grep -q 'assets/model/bpe.model'
           if unzip -Z1 "$apk" | grep -Eq '^assets/(qwen|secondpass|punctuation)/'; then echo 'Unexpected extra model' >&2; exit 1; fi
           unzip -l "$apk" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
           ls -lh "$apk"
