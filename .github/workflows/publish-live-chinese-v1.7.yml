@@ -31,7 +31,9 @@ jobs:
           mv verified/LiveChineseOffline-A16.apk verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
           unzip -t verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | tail -2
           unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -q '^assets/model/encoder.int8.onnx$'
-          unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -q '^assets/model/joiner.int8.onnx          sha256sum verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
+          unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -q '^assets/model/joiner.int8.onnx$'
+          if unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -Eq '^assets/(qwen|punctuation|secondpass)/'; then echo 'Unexpected extra model' >&2; exit 1; fi
+          sha256sum verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
           du -h verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
 
       - name: Publish direct APK as GitHub Release
