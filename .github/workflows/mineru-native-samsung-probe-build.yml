@@ -1,0 +1,71 @@
+name: Package MinerU ARM64 native loader diagnostic APK
+on:
+  push:
+    branches: [mineru-standard-arm64-native-port]
+    paths: ['.github/workflows/mineru-native-samsung-probe-build.yml','AndroidNativeLibProbe/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Download compiled pinned llama.cpp libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: mineru-pinned-llama-cpp-arm64-native
+          repository: hh786686-ship-it/a
+          run-id: '42500439439'
+          github-token: ${{ github.token }}
+          path: AndroidNativeLibProbe/app/src/main/jniLibs/arm64-v8a
+      - name: Download compiled DocVortex Python extension
+        uses: actions/download-artifact@v4
+        with:
+          name: docvortex-android-arm64-python-native
+          repository: hh786686-ship-it/a
+          run-id: '42500991072'
+          github-token: ${{ github.token }}
+          path: /tmp/docvortex-native
+      - name: Package authentic Chaquopy Python ARM64 runtime and both native deps
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager "ndk;27.2.12479018" "platforms;android-35" "build-tools;35.0.0"
+          LIB=AndroidNativeLibProbe/app/src/main/jniLibs/arm64-v8a
+          cp /tmp/docvortex-native/_native.so "$LIB/libdocvortex_native.so"
+          V=3.11.17-0
+          curl -fL --retry 3 -o /tmp/chaquopy-python.zip "https://repo.maven.apache.org/maven2/com/chaquo/python/target/$V/target-$V-arm64-v8a.zip"
+          unzip -j /tmp/chaquopy-python.zip 'jniLibs/arm64-v8a/*.so' -d "$LIB"
+          cp "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$LIB"
+          ls -lh "$LIB"
+      - name: Build signed Android diagnostic APK
+        working-directory: AndroidNativeLibProbe
+        run: gradle --no-daemon assembleDebug
+      - name: Check APK archive, signature and ABI architecture
+        run: |
+          set -euo pipefail
+          APK=AndroidNativeLibProbe/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" | tail -n 1
+          for lib in libllama.so libggml-base.so libggml-cpu.so libggml.so libpython3.11.so libdocvortex_native.so; do
+            unzip -l "$APK" | grep "lib/arm64-v8a/$lib"
+          done
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MinerU-ARM64-Native-Library-DIAGNOSTIC-NOT-FULL-OCR
+          path: AndroidNativeLibProbe/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
