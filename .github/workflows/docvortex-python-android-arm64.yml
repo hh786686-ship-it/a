@@ -36,6 +36,16 @@ jobs:
           export PYO3_CROSS_PYTHON_VERSION=3.12
           export PYO3_BUILD_EXTENSION_MODULE=1
           export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+          # PyO3 must not request a desktop libpython3.12 when targeting Android.
+          cat >/tmp/pyo3-android-config <<'CFG'
+          implementation=CPython
+          version=3.12
+          shared=true
+          abi3=true
+          lib_name=python3.12
+          suppress_build_script_link_lines=true
+          CFG
+          export PYO3_CONFIG_FILE=/tmp/pyo3-android-config
           cd /tmp/docvortex
           cargo build -p docvortex-python --target aarch64-linux-android --release
           mkdir -p /tmp/docvortex-android-results
