@@ -1,0 +1,69 @@
+name: Smoke-test MinerU llama native runtime on Android emulator
+on:
+  workflow_dispatch:
+  push:
+    branches: [mineru-native-android-experimental]
+    paths:
+      - '.github/workflows/mineru-android-native-runtime-smoke.yml'
+concurrency:
+  group: mineru-android-native-runtime-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-emulator-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android emulator and NDK
+        run: sdkmanager --install "ndk;27.2.12479018" "platforms;android-35" "emulator" "system-images;android-35;google_apis;x86_64"
+      - name: Install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends cmake ninja-build git
+      - name: Fetch upstream MinerU llama.cpp submodule
+        run: |
+          git clone --depth=1 --recurse-submodules https://github.com/opendatalab/mineru-llama-cpp.git /tmp/mineru-llama-cpp
+          git -C /tmp/mineru-llama-cpp submodule update --init --recursive --depth=1
+      - name: Compile real llama.cpp Android x86_64 for emulator loader test
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          cmake -S /tmp/mineru-llama-cpp/third_party/llama.cpp -B /tmp/llama-android-x86 -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-26 \
+            -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
+            -DGGML_BACKEND_DL=OFF -DGGML_VULKAN=OFF \
+            -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_OPENSSL=OFF -DLLAMA_CURL=OFF
+          cmake --build /tmp/llama-android-x86 --target llama-app --parallel 3
+          file "$(find /tmp/llama-android-x86 -type f -name llama-app | head -1)"
+      - name: Enable KVM
+        run: sudo chown "${USER}" /dev/kvm
+      - name: Execute Android native library and CLI startup test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -e
+            adb shell 'mkdir -p /data/local/tmp/mineru-native'
+            find /tmp/llama-android-x86 -type f -name '*.so' -print0 | while IFS= read -r -d '' so; do
+              adb push "$so" /data/local/tmp/mineru-native/
+            done
+            CLI="$(find /tmp/llama-android-x86 -type f -name llama-app | head -1)"
+            adb push "$CLI" /data/local/tmp/mineru-native/llama-app
+            adb shell 'chmod +x /data/local/tmp/mineru-native/llama-app'
+            adb shell 'cd /data/local/tmp/mineru-native && LD_LIBRARY_PATH=. ./llama-app --help' > /tmp/mineru-native-android-startup.log 2>&1
+            head -n 35 /tmp/mineru-native-android-startup.log
+            test -s /tmp/mineru-native-android-startup.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MinerU-llama-Android-emulator-startup-log
+          path: /tmp/mineru-native-android-startup.log
+          if-no-files-found: warn
