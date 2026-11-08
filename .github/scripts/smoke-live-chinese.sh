@@ -14,7 +14,7 @@ ready=0
 for i in $(seq 1 60); do
   adb shell uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1 || true
   adb shell cat /sdcard/uidump.xml > /tmp/livechinese.xml 2>/dev/null || true
-  if grep -q 'Qwen model ready' /tmp/livechinese.xml; then ready=1; break; fi
+  if grep -Eq 'Qwen model ready|Qwen self-test passed' /tmp/livechinese.xml; then ready=1; break; fi
   if grep -q 'Qwen cannot load on this device' /tmp/livechinese.xml; then
     echo 'Model initialization failed:'
     cat /tmp/livechinese.xml
@@ -24,7 +24,7 @@ for i in $(seq 1 60); do
   sleep 3
 done
 if [[ "$ready" != 1 ]]; then
-  echo "Did not see offline model ready in Android UI"
+  echo "Did not see Qwen model ready or Qwen self-test passed in Android UI"
   cat /tmp/livechinese.xml
   adb logcat -d -t 1200 | tail -300
   exit 1
