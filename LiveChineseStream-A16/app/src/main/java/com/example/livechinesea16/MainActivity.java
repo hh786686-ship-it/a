@@ -66,11 +66,6 @@ public final class MainActivity extends Activity implements CaptionService.Liste
         getWindow().setStatusBarColor(Color.rgb(14, 24, 39));
         getWindow().setNavigationBarColor(Color.rgb(14, 24, 39));
         selfTestRequested = getIntent().getBooleanExtra("ciSmokeTest", false);
-        if (getIntent().getBooleanExtra("ciEnableCallMode", false)) {
-            // Explicit CI harness only: requires enabled AccessibilityService.
-            getSharedPreferences(CaptionService.PREFS, MODE_PRIVATE).edit()
-                    .putBoolean(CaptionService.KEY_CALL_MODE, true).apply();
-        }
         makeUi();
     }
 

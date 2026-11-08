@@ -141,8 +141,29 @@ if [[ "$connected" != 1 ]]; then
   exit 1
 fi
 echo 'PASS: user-enabled accessibility caption service connected'
-adb shell am start -n "$app/.MainActivity" --ez ciEnableCallMode true
-sleep 3
+# Enable Call Mode using the same switch that a real user taps.
+adb shell uiautomator dump /sdcard/callmodeui.xml >/dev/null 2>&1
+adb shell cat /sdcard/callmodeui.xml > /tmp/callmodeui.xml
+python3 - <<'PY'
+import re
+s=open('/tmp/callmodeui.xml').read()
+m=re.search(r'text="Experimental Call Mode \(speakerphone\)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',s)
+if not m:
+    raise SystemExit('FAIL: cannot find Call Mode switch on Android UI')
+a,b,c,d=map(int,m.groups())
+open('/tmp/call-switch-coordinates','w').write(f'{(a+c)//2} {(b+d)//2}\n')
+PY
+read -r sx sy < /tmp/call-switch-coordinates
+echo "Turning on Call Mode at $sx,$sy"
+adb shell input tap "$sx" "$sy"
+sleep 2
+adb shell uiautomator dump /sdcard/callmodeenabled.xml >/dev/null 2>&1
+adb shell cat /sdcard/callmodeenabled.xml > /tmp/callmodeenabled.xml
+if ! grep -q 'Call Mode READY' /tmp/callmodeenabled.xml; then
+  echo 'FAIL: Call Mode READY not displayed after toggling switch'
+  cat /tmp/callmodeenabled.xml
+  exit 1
+fi
 adb shell input tap "$x" "$y"
 sleep 7
 adb logcat -d -v brief -s 'LiveChineseA16:*' > /tmp/callmode-recording.log
