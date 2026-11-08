@@ -62,6 +62,15 @@ jobs:
           "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang++" \
              /tmp/mineru-native-smoke.cpp -o /tmp/mineru-native-smoke -ldl
           file /tmp/mineru-native-smoke
+      - name: Reclaim compiler disk before starting Android emulator
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mineru-native-bundle
+          find /tmp/mineru-native-bundle -type f -name '*.so' -exec cp -f {} /tmp/mineru-native-bundle/ \\;
+          cp /tmp/mineru-native-smoke /tmp/mineru-native-bundle/mineru-native-smoke
+          rm -rf /tmp/llama-android-x86 /tmp/mineru-llama-cpp
+          sudo rm -rf "$ANDROID_HOME/ndk/27.2.12479018"
+          df -h / /tmp /home/runner
       - name: Enable KVM
         run: sudo chown "${USER}" /dev/kvm
       - name: Execute Android native library and CLI startup test
@@ -71,6 +80,8 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_4
+          disk-size: 2048M
+          ram-size: 2048M
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
             set -e
@@ -78,7 +89,7 @@ jobs:
             find /tmp/llama-android-x86 -type f -name '*.so' -print0 | while IFS= read -r -d '' so; do
               adb push "$so" /data/local/tmp/mineru-native/
             done
-            adb push /tmp/mineru-native-smoke /data/local/tmp/mineru-native/mineru-native-smoke
+            adb push /tmp/mineru-native-bundle/mineru-native-smoke /data/local/tmp/mineru-native/mineru-native-smoke
             adb shell 'chmod +x /data/local/tmp/mineru-native/mineru-native-smoke'
             adb shell 'cd /data/local/tmp/mineru-native && LD_LIBRARY_PATH=. ./mineru-native-smoke' > /tmp/mineru-native-android-startup.log 2>&1
             grep -q 'Android llama engine started:' /tmp/mineru-native-android-startup.log
