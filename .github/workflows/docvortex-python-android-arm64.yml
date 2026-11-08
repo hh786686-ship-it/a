@@ -1,0 +1,59 @@
+name: Compile DocVortex CPython extension on Android ARM64
+on:
+  workflow_dispatch:
+  push:
+    branches: [mineru-native-android-experimental]
+    paths:
+      - '.github/workflows/docvortex-python-android-arm64.yml'
+jobs:
+  rust-python-extension:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;27.2.12479018"
+      - name: Clone upstream DocVortex and configure Android PyO3 extension
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://github.com/myhloli/docvortex.git /tmp/docvortex
+          cd /tmp/docvortex
+          rustup target add aarch64-linux-android
+          sed -i 's/features = \["abi3-py311"\]/features = ["abi3-py311", "extension-module"]/' rust/docvortex-python/Cargo.toml
+          grep -F 'features = ["abi3-py311", "extension-module"]' rust/docvortex-python/Cargo.toml
+      - name: Cross-compile DocVortex Python native extension for Android
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
+          export CC_aarch64_linux_android="$CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          export PYO3_CROSS=1
+          export PYO3_CROSS_PYTHON_VERSION=3.12
+          export PYO3_BUILD_EXTENSION_MODULE=1
+          export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
+          cd /tmp/docvortex
+          cargo build -p docvortex-python --target aarch64-linux-android --release
+          mkdir -p /tmp/docvortex-android-results
+          SO=target/aarch64-linux-android/release/lib_native.so
+          test -s "$SO"
+          file "$SO" | tee /tmp/docvortex-android-results/file.txt
+          readelf -h "$SO" | tee /tmp/docvortex-android-results/elf.txt
+          readelf -d "$SO" | tee /tmp/docvortex-android-results/dynamic.txt
+          grep -q AArch64 /tmp/docvortex-android-results/elf.txt
+          cp "$SO" /tmp/docvortex-android-results/_native.so
+      - name: Caveat
+        if: always()
+        run: |
+          echo 'Compiling a native CPython extension does not make all the MinerU Standard Python dependencies Android compatible.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Android import must also be tested with the same CPython 3.12 embedded runtime.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DocVortex-Android-ARM64-CPython-extension
+          path: /tmp/docvortex-android-results/
+          if-no-files-found: warn
