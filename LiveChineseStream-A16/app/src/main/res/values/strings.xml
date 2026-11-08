@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+ <string name="call_accessibility_title">Live Chinese Call Listening</string>
+ <string name="call_accessibility_description">Optional speakerphone captions. Allows microphone sharing during calls when Call Mode is on. Does not read screen content, does not capture phone-call audio internally, and sends no data online.</string>
+</resources>

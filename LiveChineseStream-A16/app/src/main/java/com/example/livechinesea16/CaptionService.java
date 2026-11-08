@@ -18,6 +18,9 @@ import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.media.AudioManager;
+import android.media.AudioRecordingConfiguration;
+import java.util.List;
 import android.media.MediaRecorder;
 import android.os.Binder;
 import android.os.Build;
@@ -58,6 +61,7 @@ public final class CaptionService extends Service {
     public static final String KEY_WIDTH = "max_width_percent";
     public static final String KEY_LINES = "max_visible_lines";
     public static final String KEY_FONT = "font_sp";
+    public static final String KEY_CALL_MODE = "call_mode_enabled";
     private static final String LOG_TAG = "LiveChineseA16";
     private static final String CHANNEL = "live_chinese_microphone";
     private static final int NOTIFICATION = 217;
@@ -259,24 +263,64 @@ public final class CaptionService extends Service {
     private void startListening() {
         if (!ready || listening || busy || !foreground) return;
         pendingStart = false;
+        final boolean callMode = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_CALL_MODE, false);
+        final CallAudioAccessibilityService accessibility = CallAudioAccessibilityService.current();
+        if (callMode && accessibility == null) {
+            setStatus("Call Mode requires the enabled Live Chinese accessibility service");
+            Log.w(LOG_TAG, "CallMode: accessibility service not connected; refusing to silently fall back to MIC");
+            return;
+        }
         int minimum = AudioRecord.getMinBufferSize(SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minimum <= 0) { setStatus("16 kHz microphone unavailable"); return; }
         try {
-            AudioRecord a = new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minimum * 2, SAMPLE_RATE * 6));
+            int bufferSize = Math.max(minimum * 2, SAMPLE_RATE * 6);
+            // In Call Mode, AudioRecord MUST be constructed by the active
+            // AccessibilityService with VOICE_RECOGNITION source. Ordinary
+            // background microphone recording may be silenced during calls.
+            // This still only records acoustic microphone audio, NOT the call downlink.
+            AudioRecord a = callMode
+                    ? accessibility.openCallMicrophone(SAMPLE_RATE, bufferSize)
+                    : new AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
+                            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                            bufferSize);
+            if (a == null) {
+                setStatus("Call microphone could not be opened");
+                return;
+            }
             if (a.getState() != AudioRecord.STATE_INITIALIZED) {
                 a.release();
                 setStatus("Microphone initialization failed");
                 return;
             }
+            if (Build.VERSION.SDK_INT >= 29) {
+                a.registerAudioRecordingCallback(getMainExecutor(),
+                    new AudioManager.AudioRecordingCallback() {
+                        @Override public void onRecordingConfigChanged(
+                                List<AudioRecordingConfiguration> configurations) {
+                            AudioRecordingConfiguration current = a.getActiveRecordingConfiguration();
+                            if (current != null && current.isClientSilenced()) {
+                                setStatus("Android muted our microphone input during the call");
+                                Log.w(LOG_TAG, "CallMode: Android silenced this audio capture");
+                            } else if (current != null && listening) {
+                                setStatus(callMode ? "● Call Mode mic active — use speakerphone"
+                                        : "● Listening live");
+                            }
+                        }
+                    });
+            }
             a.startRecording();
             Log.i(LOG_TAG, "AudioRecord state after start: " + a.getRecordingState());
+            Log.i(LOG_TAG, callMode
+                    ? "CallMode: VOICE_RECOGNITION microphone opened by AccessibilityService"
+                    : "NormalMode: MIC microphone opened by CaptionService");
             microphone = a;
             listening = true;
             busy = true;
-            setStatus("● Listening live");
+            setStatus(callMode
+                    ? "● Call Mode listening — speakerphone ON; remote voice not guaranteed"
+                    : "● Listening live");
             new Thread(() -> decodeLoop(a), "live-recognizer").start();
             refreshNotification();
         } catch (Throwable e) {
@@ -379,11 +423,15 @@ public final class CaptionService extends Service {
         Intent close = new Intent(this, CaptionService.class).setAction(ACTION_CLOSE);
         PendingIntent quit = PendingIntent.getService(this, 1, close,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        final boolean callMode = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_CALL_MODE, false);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("Live Chinese Offline")
-                .setContentText(listening ? "Listening • floating subtitles pinned" :
-                        "Floating subtitles pinned • microphone paused")
+                .setContentText(listening
+                        ? (callMode ? "Call Mode mic • use speakerphone • captions pinned"
+                                : "Listening • floating subtitles pinned")
+                        : "Floating subtitles pinned • microphone paused")
                 .setContentIntent(open)
                 .setOngoing(true)
                 .addAction(new Notification.Action.Builder(

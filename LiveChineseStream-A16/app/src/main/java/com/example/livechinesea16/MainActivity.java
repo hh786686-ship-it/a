@@ -19,6 +19,7 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.Switch;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -36,6 +37,8 @@ public final class MainActivity extends Activity implements CaptionService.Liste
     private boolean selfTestRequested;
     private TextView statusView, metricView, transcriptView, widthLabel, linesLabel, fontLabel;
     private Button listenButton;
+    private Switch callModeSwitch;
+    private TextView callModeStatus;
     private SeekBar widthBar, linesBar, fontBar;
     private boolean updatingSliders;
 
@@ -63,12 +66,21 @@ public final class MainActivity extends Activity implements CaptionService.Liste
         getWindow().setStatusBarColor(Color.rgb(14, 24, 39));
         getWindow().setNavigationBarColor(Color.rgb(14, 24, 39));
         selfTestRequested = getIntent().getBooleanExtra("ciSmokeTest", false);
+        if (getIntent().getBooleanExtra("ciEnableCallMode", false)) {
+            // Explicit CI harness only: requires enabled AccessibilityService.
+            getSharedPreferences(CaptionService.PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(CaptionService.KEY_CALL_MODE, true).apply();
+        }
         makeUi();
     }
 
     @Override protected void onStart() {
         super.onStart();
         bindService(new Intent(this, CaptionService.class), connection, BIND_AUTO_CREATE);
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        if (callModeStatus != null) refreshCallModeStatus();
     }
     @Override protected void onStop() {
         if (bound) {
@@ -134,6 +146,44 @@ public final class MainActivity extends Activity implements CaptionService.Liste
                 "Drag the six dots to move; drop at the very bottom to close. Pinch subtitle text to zoom.",
                 12, Color.rgb(183, 199, 211), false);
         page.addView(explainer, withTop(9));
+
+        // User opts in to an Android accessibility service designed solely for
+        // speakerphone microphone sharing. Never auto-enable this system permission.
+        SharedPreferences callPrefs = getSharedPreferences(CaptionService.PREFS, MODE_PRIVATE);
+        callModeSwitch = new Switch(this);
+        callModeSwitch.setText("Experimental Call Mode (speakerphone)");
+        callModeSwitch.setTextColor(Color.WHITE);
+        callModeSwitch.setTextSize(15);
+        callModeSwitch.setChecked(callPrefs.getBoolean(CaptionService.KEY_CALL_MODE, false));
+        page.addView(callModeSwitch, withTop(16));
+        TextView callDescription = text(
+                "For live captions of the other caller, turn on speakerphone. " +
+                "Call Mode uses the microphone via an Accessibility Service; it cannot " +
+                "read incoming call audio directly and may also hear your voice. " +
+                "Nothing is uploaded. Captions remain visible during silence.",
+                12, Color.rgb(196, 205, 221), false);
+        page.addView(callDescription, withTop(5));
+        callModeStatus = text("", 12, Color.rgb(250, 206, 117), true);
+        page.addView(callModeStatus, withTop(8));
+        Button accessibilitySettings = button("Enable Call Listening in Accessibility settings");
+        page.addView(accessibilitySettings, withTop(5));
+        accessibilitySettings.setOnClickListener(v -> openAccessibilitySettings());
+        callModeSwitch.setOnCheckedChangeListener((v, enabled) -> {
+            callPrefs.edit().putBoolean(CaptionService.KEY_CALL_MODE, enabled).apply();
+            if (captions != null && captions.isListening()) {
+                captions.stopListening();
+                Toast.makeText(this, "Restart listening to change microphone mode",
+                        Toast.LENGTH_LONG).show();
+            }
+            refreshCallModeStatus();
+            if (enabled && !CallAudioAccessibilityService.isConnected()) {
+                Toast.makeText(this,
+                        "Enable Live Chinese Call Listening in Accessibility settings",
+                        Toast.LENGTH_LONG).show();
+                openAccessibilitySettings();
+            }
+        });
+        refreshCallModeStatus();
 
         LinearLayout settings = new LinearLayout(this);
         settings.setOrientation(LinearLayout.VERTICAL);
@@ -226,6 +276,21 @@ public final class MainActivity extends Activity implements CaptionService.Liste
         });
         return seek;
     }
+    private void openAccessibilitySettings() {
+        Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        startActivity(i);
+    }
+    private void refreshCallModeStatus() {
+        if (callModeStatus == null) return;
+        boolean enabled = getSharedPreferences(CaptionService.PREFS, MODE_PRIVATE)
+                .getBoolean(CaptionService.KEY_CALL_MODE, false);
+        callModeStatus.setText(!enabled ? "Call Mode OFF — normal microphone"
+                : CallAudioAccessibilityService.isConnected()
+                        ? "Call Mode READY — enable speakerphone during your call"
+                        : "Accessibility permission needed — tap Enable above");
+        callModeStatus.setTextColor(CallAudioAccessibilityService.isConnected()
+                ? Color.rgb(134, 239, 172) : Color.rgb(250, 206, 117));
+    }
     private void refreshSettingsLabels() {
         SharedPreferences p = getSharedPreferences(CaptionService.PREFS, MODE_PRIVATE);
         widthLabel.setText("Maximum width: " + p.getInt(CaptionService.KEY_WIDTH, 78) + "% of screen");
@@ -238,6 +303,7 @@ public final class MainActivity extends Activity implements CaptionService.Liste
         runOnUiThread(() -> {
             if (captions == null) return;
             statusView.setText(captions.getStatus());
+            refreshCallModeStatus();
             metricView.setText(captions.getMetric());
             listenButton.setEnabled(captions.isReady());
             listenButton.setText(captions.isListening() ? "Stop listening" : "Start listening");
@@ -265,6 +331,14 @@ public final class MainActivity extends Activity implements CaptionService.Liste
             Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName()));
             startActivity(i);
+            return;
+        }
+        if (getSharedPreferences(CaptionService.PREFS, MODE_PRIVATE)
+                .getBoolean(CaptionService.KEY_CALL_MODE, false)
+                && !CallAudioAccessibilityService.isConnected()) {
+            Toast.makeText(this, "Enable the Call Listening accessibility service first",
+                    Toast.LENGTH_LONG).show();
+            openAccessibilitySettings();
             return;
         }
         Intent i = new Intent(this, CaptionService.class);
