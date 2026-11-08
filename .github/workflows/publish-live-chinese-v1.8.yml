@@ -1,0 +1,42 @@
+name: Publish Live Chinese v1.8 floating overlay APK
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-live-chinese-v1.8.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Download successful emulator-tested APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified
+          gh run download 42497422894 --repo "${{ github.repository }}" --name LiveChineseOffline-A16-APK --dir verified
+          test -f verified/LiveChineseOffline-A16.apk
+          test $(wc -c < verified/LiveChineseOffline-A16.apk) -gt 150000000
+          mv verified/LiveChineseOffline-A16.apk verified/LiveChineseOffline-v1.8-Overlay-ZH-ARM64.apk
+          unzip -t verified/LiveChineseOffline-v1.8-Overlay-ZH-ARM64.apk | tail -2
+          unzip -l verified/LiveChineseOffline-v1.8-Overlay-ZH-ARM64.apk | grep 'assets/model/encoder.int8.onnx'
+          unzip -l verified/LiveChineseOffline-v1.8-Overlay-ZH-ARM64.apk | grep 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          sha256sum verified/LiveChineseOffline-v1.8-Overlay-ZH-ARM64.apk
+
+      - name: Publish direct APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v1.8.0 verified/LiveChineseOffline-v1.8-Overlay-ZH-ARM64.apk \
+            --repo "${{ github.repository }}" \
+            --target a8609474cf3c3e9e8b9b58328524e134fdfd82db \
+            --title 'Live Chinese Offline v1.8 — Persistent 5-line overlay' \
+            --notes 'Offline Android 9+ ARM64 Mandarin true-streaming Zipformer. New: translucent five-line floating subtitles over Home and other apps; six-dot drag handle; bottom-edge close; pinch zoom text 12-40sp; in-app maximum width, visible lines and text size. Silence does not dismiss overlay. Android microphone foreground service. GitHub Actions run 42497422894 passed: Android compilation, APK signing, native ASR decode, microphone start and Home-screen overlay persistence on emulator API35. Physical A16 speech latency, accuracy, sustained recording and multi-touch gestures NOT independently verified. Model is Mandarin-only; English not included. Grant microphone and display-over-apps permissions on first use.'
+          gh release view v1.8.0 --repo "${{ github.repository }}" --json url,assets
