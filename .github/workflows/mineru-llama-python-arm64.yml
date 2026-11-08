@@ -38,10 +38,7 @@ jobs:
           sed -i 's/Interpreter Development.SABIModule/Development.SABIModule/' src/cpp/CMakeLists.txt
           # Android does not resolve Python symbols from a process-global interpreter.
           # Explicitly link the real Android libpython into the SABI extension.
-          sed -i '/^Python_add_library(_mineru_llama_cpp /,/^)/ { /^)/a\
-\
-target_link_libraries(_mineru_llama_cpp PRIVATE /tmp/chaquo-android/jniLibs/arm64-v8a/libpython3.11.so)
-          }' src/cpp/CMakeLists.txt
+          sed -i '/^    server-context$/i\\    /tmp/chaquo-android/jniLibs/arm64-v8a/libpython3.11.so' src/cpp/CMakeLists.txt
           NDK="$ANDROID_HOME/ndk/27.2.12479018"
           cmake -S . -B /tmp/mineru-llama-arm64 -G Ninja \
              -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
