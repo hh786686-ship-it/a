@@ -31,7 +31,46 @@ jobs:
           mv verified/LiveChineseOffline-A16.apk verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
           unzip -t verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | tail -2
           unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -q '^assets/model/encoder.int8.onnx$'
-          unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -q '^assets/model/joiner.int8.onnx
+          unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -q '^assets/model/joiner.int8.onnx          sha256sum verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
+          du -h verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
+
+      - name: Publish direct APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.7.0 --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload v1.7.0 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk --repo "${{ github.repository }}" --clobber
+          else
+            gh release create v1.7.0 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk \
+              --repo "${{ github.repository }}" \
+              --title "Live Chinese Offline v1.7 - Genuine Streaming Zipformer Mandarin" \
+              --notes "Offline Android 9+ ARM64 genuine streaming Mandarin-only Zipformer Large INT8 2025-06-30. No Qwen, Paraformer, neural punctuation, or English ASR. Published source benchmark is 1.91% CER (98.09% after subtraction) on AISHELL-1 for transducer streaming decoding, NOT guaranteed on the Galaxy A16. In emulator: model initialized, native streaming silent-audio decoding passed, microphone started, and APK signature verified; real-phone speech delay and accuracy NOT independently verified. 24sp font preserved." \
+              --target "${{ github.sha }}"
+          fi
+          gh release view v1.7.0 --repo "${{ github.repository }}" --json url,assets
+
+          if unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -Eq '^assets/(qwen|punctuation|secondpass)/'; then echo 'Found unwanted extra model' >&2; exit 1; fi
+          sha256sum verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
+          du -h verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
+
+      - name: Publish direct APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.7.0 --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload v1.7.0 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk --repo "${{ github.repository }}" --clobber
+          else
+            gh release create v1.7.0 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk \
+              --repo "${{ github.repository }}" \
+              --title "Live Chinese Offline v1.7 - Qwen3 0.6B Only" \
+              --notes "Experimental v1.7 for Android 9+ ARM64. Uses one offline Qwen3-ASR 0.6B INT8 model only, no Paraformer/SenseVoice/CT-Transformer. Mandarin/English audio processed in 2s chunks; 24sp transcript font; simple rule-based Chinese full stops. Android emulator compiled, signed, loaded Qwen and decoded 2 seconds of silent audio and started microphone; does not guarantee 2s word display, 98% accuracy, or compatibility with Samsung A16 5G 4GB RAM. Qwen-only avoids the simultaneous two-model memory burden that caused suspected v1.5 startup crashes." \
+              --target "${{ github.sha }}"
+          fi
+          gh release view v1.7.0 --repo "${{ github.repository }}" --json url,assets
+
+          if unzip -Z1 verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk | grep -Eq '^assets/(qwen|punctuation|secondpass)/'; then echo 'Unexpected extra model' >&2; exit 1; fi
           sha256sum verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
           du -h verified/LiveChineseOffline-v1.7-Zipformer-Streaming-ZH-ARM64.apk
 
