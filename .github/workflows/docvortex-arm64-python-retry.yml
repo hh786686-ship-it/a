@@ -53,7 +53,21 @@ jobs:
           export LIBRARY_PATH=/tmp/chaquo-python/lib
           export PYO3_CROSS=1
           export PYO3_CROSS_PYTHON_VERSION=3.11
-          export PYO3_CROSS_LIB_DIR=/tmp/chaquo-python/lib
+          # The target ZIP provides Android binaries/headers, but PyO3's
+          # cross discovery expects _sysconfigdata*.py. Specify the real
+          # target interpreter's ABI explicitly instead of fabricating it.
+          cat > /tmp/pyo3-android-config.txt <<'PYO3'
+          implementation=CPython
+          version=3.11
+          shared=true
+          abi3=true
+          lib_name=python3.11
+          lib_dir=/tmp/chaquo-python/lib
+          pointer_width=64
+          build_flags=
+          suppress_build_script_link_lines=false
+          PYO3
+          export PYO3_CONFIG_FILE=/tmp/pyo3-android-config.txt
           cargo +1.98.1 build --release --target aarch64-linux-android -p docvortex-python --lib -j 2
           mkdir -p "$GITHUB_WORKSPACE/native-arm64/docvortex"
           cp target/aarch64-linux-android/release/lib_native.so "$GITHUB_WORKSPACE/native-arm64/docvortex/_native.so"
