@@ -8,7 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Unpack Android source
@@ -49,8 +49,16 @@ jobs:
       - name: Build signed small APK
         working-directory: pocket-build
         run: gradle --no-daemon --stacktrace :app:assembleRelease
-      - uses: actions/upload-artifact@v4
-        with:
-          name: PocketHighlighter-APK
-          path: pocket-build/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
+      - name: Save APK on isolated build branch (not workflow artifacts)
+        shell: bash
+        run: |
+          mkdir -p pocket-build/install/encoded
+          cp pocket-build/app/build/outputs/apk/release/app-release.apk pocket-build/install/PocketHighlighter.apk
+          stat -c 'APK_SIZE_BYTES=%s' pocket-build/install/PocketHighlighter.apk
+          sha256sum pocket-build/install/PocketHighlighter.apk
+          xz -9e -T2 -c pocket-build/install/PocketHighlighter.apk | base64 -w0 | fold -w 4096 | split -d -a 3 -l 1 - pocket-build/install/encoded/part-
+          git config user.name 'GitHub Actions APK Builder'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pocket-build/install/PocketHighlighter.apk pocket-build/install/encoded/
+          git commit -m 'Add compiled Pocket Highlighter APK'
+          git push origin HEAD:build-pocket-highlighter-20261112
