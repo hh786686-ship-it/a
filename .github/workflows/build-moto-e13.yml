@@ -15,6 +15,18 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Restore verified v1.9 app source with overlay and Call Mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin tag v1.9.0
+          rm -rf LiveChineseStream-A16
+          git archive v1.9.0 LiveChineseStream-A16 | tar -x
+          test -f LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
+          test -f LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CallAudioAccessibilityService.java
+          grep -q 'SYSTEM_ALERT_WINDOW' LiveChineseStream-A16/app/src/main/AndroidManifest.xml
+          grep -q '1.9.0-call-experimental' LiveChineseStream-A16/app/build.gradle.kts
+          echo 'Restored the complete v1.9.0 floating-overlay and experimental Call Mode source.'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -57,6 +69,10 @@ jobs:
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -20
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "native-code: 'armeabi-v7a'"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName=\'1.9.0-call-experimental\'"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -F "android.permission.SYSTEM_ALERT_WINDOW"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CaptionService"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CallAudioAccessibilityService"
             unzip -l "$apk" | grep -F 'lib/armeabi-v7a/libsherpa-onnx-jni.so'
             unzip -l "$apk" | grep -F 'lib/armeabi-v7a/libonnxruntime.so'
             unzip -l "$apk" | grep -F 'assets/model/encoder.int8.onnx'
@@ -73,11 +89,11 @@ jobs:
           set -euo pipefail
           {
             apk=LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
-            name=LiveChineseOffline-MotoE13-32bit-v1.9.1.apk
+            name=LiveChineseOffline-v1.9-MotoE13-Overlay-32bit.apk
             cp "$apk" "$RUNNER_TEMP/$name"
-            tag=moto-e13-v1.9.1
+            tag=moto-e13-v1.9.2
             if ! gh release view "$tag" >/dev/null 2>&1; then
-              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline for Moto e13 (32-bit ARM)" --notes "Experimental Moto e13-compatible 32-bit ARM APK. Android 9+, fully offline Mandarin model. Native armeabi-v7a only. No installation test on physical Moto e13 yet. May require sufficient free space and RAM." --prerelease
+              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.9 Overlay + Call Mode - Moto e13 32-bit" --notes "Uses the v1.9.0 release source, including persistent grey floating five-line subtitles, overlay width, line count, font-size controls, drag and pinch gestures, and experimental speakerphone Call Mode. Recompiled for 32-bit armeabi-v7a Moto e13. Requires draw-over-other-apps and microphone permissions; experimental accessibility service is opt-in. No guaranteed simultaneous call audio. Device runtime performance on Moto e13 remains unverified." --prerelease
             fi
             gh release upload "$tag" "$RUNNER_TEMP/$name" --clobber
             gh release view "$tag" --json url,assets --jq '{url:.url, assets:[.assets[].name]}'
@@ -96,6 +112,7 @@ jobs:
             echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
             echo "Commit: $GITHUB_SHA"
+            echo "App source: v1.9.0 tag (overlay and Call Mode)"
             echo
             for log in "$RUNNER_TEMP/setup.log" "$RUNNER_TEMP/build.log" "$RUNNER_TEMP/verify.log" "$RUNNER_TEMP/publish.log"; do
               if [ -f "$log" ]; then
