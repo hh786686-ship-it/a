@@ -1,0 +1,94 @@
+name: Build Pocket Highlighter Windows with Ctrl-F
+on:
+  push:
+    branches: [pocket-highlighter-windows-find-20261112]
+    paths-ignore: ['windows-find/dist/**']
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unpack and validate original source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows-build | Out-Null
+          $parts = Get-Content -Raw windows-src/part0.txt,windows-src/part1.txt,windows-src/part2.txt
+          $b64 = ($parts -join '').Trim()
+          $b64 | Set-Content -NoNewline windows-build/source.base64
+          @'
+          import base64,hashlib
+          from pathlib import Path
+          s=Path("windows-build/source.base64").read_text().strip()
+          checksum="abdb8cf3062675235e990c580ffea0cc618c5a47f66e3d7155582bd3f20795c1"
+          options=[s] if len(s)%4==0 else (s[:i]+s[i+1:] for i in range(len(s)))
+          for cand in options:
+              try:
+                  data=base64.b64decode(cand,validate=True)
+                  if hashlib.sha256(data).hexdigest()==checksum:
+                      Path("windows-build/source.tar.xz").write_bytes(data)
+                      print("Original source SHA-256 verified")
+                      break
+              except (ValueError,base64.binascii.Error):
+                  pass
+          else: raise RuntimeError("Source transfer checksum invalid")
+          '@ | python -
+          tar -xJf windows-build/source.tar.xz -C windows-build
+          Copy-Item windows-find/find_addon.py windows-build/find_addon.py
+          @'
+
+          from find_addon import install as _install_search
+          _install_search(App)
+          '@ | Add-Content windows-build/pocket_highlighter.py
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r windows-build/requirements.txt pyinstaller==6.16.0
+      - name: Test search and existing functionality
+        working-directory: windows-build
+        shell: pwsh
+        run: |
+          python -m unittest -v test_pocket.py
+          @'
+          from find_addon import find_matches, summary
+          assert find_matches('你有，一些你有','你有')==[(0,2),(5,7)]
+          assert find_matches('word WORD Word','word')==[(0,4),(5,9),(10,14)]
+          assert find_matches('a.b aXb a.b','a.b')==[(0,3),(8,11)]
+          assert '你有' in summary('abc 你有 example',4,6)
+          import pocket_highlighter as p
+          assert hasattr(p.App,'ctrl_find') and hasattr(p.App,'find_show')
+          print('PASS: Unicode, case insensitive, literal search and Find UI integration')
+          '@ | python -
+      - name: Build portable Windows EXE
+        working-directory: windows-build
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name PocketHighlighterWindows_CtrlF --collect-all fitz --collect-all docx --hidden-import find_addon pocket_highlighter.py
+          if (-not (Test-Path dist/PocketHighlighterWindows_CtrlF.exe)) { throw 'EXE not built' }
+      - name: Smoke test compiled EXE on Windows
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path windows-build/dist/PocketHighlighterWindows_CtrlF.exe).Path
+          $p=Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 9
+          if ($p.HasExited) { throw "EXE crashed or closed, code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Write-Output "PASS: Compiled Windows EXE opens and stays running"
+      - name: Publish tested EXE to private build branch
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows-find/dist | Out-Null
+          Copy-Item windows-build/dist/PocketHighlighterWindows_CtrlF.exe windows-find/dist/PocketHighlighterWindows_CtrlF.exe
+          Get-FileHash windows-find/dist/PocketHighlighterWindows_CtrlF.exe -Algorithm SHA256
+          (Get-Item windows-find/dist/PocketHighlighterWindows_CtrlF.exe).Length
+          git config user.name "Pocket Highlighter Build Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add windows-find/dist/PocketHighlighterWindows_CtrlF.exe
+          git commit -m "Add tested Windows Ctrl+F executable"
+          git push origin HEAD:pocket-highlighter-windows-find-20261112
