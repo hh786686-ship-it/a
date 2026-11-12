@@ -1,0 +1,50 @@
+name: Build Pocket Highlighter v1.1 APK
+on:
+  push:
+    branches:
+      - pocket-highlighter-v2-20261112
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack updated Android project
+        shell: bash
+        run: |
+          mkdir -p pocket-v2/build
+          cat pocket-v2/source/part{01,02,03,04,05,06}.txt | base64 --decode | tar -xJ -C pocket-v2/build
+          test -f pocket-v2/build/app/src/main/java/com/pockethighlighter/DocxPages.java
+          grep -q 'moveTaskToBack(true)' pocket-v2/build/app/src/main/java/com/pockethighlighter/ReaderActivity.java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install SDK
+        shell: bash
+        run: |
+          sdkmanager_path="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$sdkmanager_path"
+          "$sdkmanager_path" 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Build release APK
+        working-directory: pocket-v2/build
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Verify and commit compiled APK to build branch
+        shell: bash
+        run: |
+          mkdir -p pocket-v2/install
+          cp pocket-v2/build/app/build/outputs/apk/release/app-release.apk pocket-v2/install/PocketHighlighter_v1_1.apk
+          stat -c 'APK_SIZE_BYTES=%s' pocket-v2/install/PocketHighlighter_v1_1.apk
+          sha256sum pocket-v2/install/PocketHighlighter_v1_1.apk
+          unzip -t pocket-v2/install/PocketHighlighter_v1_1.apk | tail -n 1
+          xz -9 -T2 -c pocket-v2/install/PocketHighlighter_v1_1.apk | base64 -w0 | fold -w 4096 | split -d -a 3 -l 1 - pocket-v2/install/encoded-
+          git config user.name 'Pocket Highlighter Build Bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pocket-v2/install
+          git commit -m 'Add compiled Pocket Highlighter v1.1 APK' || true
+          git push origin HEAD:pocket-highlighter-v2-20261112
