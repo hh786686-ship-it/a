@@ -17,6 +17,22 @@ jobs:
           cat pocket-build/source-parts/part{1,2,3,4}.txt | base64 --decode | tar -xJ -C pocket-build
           test -f pocket-build/app/build.gradle
           test -f pocket-build/app/src/main/AndroidManifest.xml
+      - name: Correct PdfDocument lifecycle in Android source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pocket-build/app/src/main/java/com/pockethighlighter/ReaderActivity.java')
+          s = p.read_text()
+          old = "            try (PdfRenderer input = new PdfRenderer(fd);\n                 PdfDocument output = new PdfDocument()) {"
+          new = "            try (PdfRenderer input = new PdfRenderer(fd)) {\n                PdfDocument output = new PdfDocument();\n                try {"
+          assert s.count(old) == 1, "PDF resource site missing"
+          s = s.replace(old, new)
+          old = "                }\n            }\n        }\n    }\n\n    private void exportJpeg"
+          new = "                }\n                } finally {\n                    output.close();\n                }\n            }\n        }\n    }\n\n    private void exportJpeg"
+          assert s.count(old) == 1, "PDF close site missing"
+          s = s.replace(old, new)
+          p.write_text(s)
+          PY
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
