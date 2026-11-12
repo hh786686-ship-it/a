@@ -1,0 +1,107 @@
+name: Windows Pocket Highlighter — Word layout and working Ctrl-F
+on:
+  push:
+    branches:
+      - pocket-highlighter-windows-word-layout-20261112
+    paths-ignore:
+      - 'windows-word/dist/**'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Restore original source and fix addon startup order
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows-build | Out-Null
+          $parts = Get-Content -Raw windows-src/part0.txt,windows-src/part1.txt,windows-src/part2.txt
+          ($parts -join '').Trim() | Set-Content -NoNewline windows-build/source.base64
+          @'
+          import base64,hashlib
+          from pathlib import Path
+          s=Path("windows-build/source.base64").read_text().strip()
+          checksum="abdb8cf3062675235e990c580ffea0cc618c5a47f66e3d7155582bd3f20795c1"
+          options=[s] if len(s)%4==0 else (s[:i]+s[i+1:] for i in range(len(s)))
+          for cand in options:
+              try:
+                  data=base64.b64decode(cand,validate=True)
+                  if hashlib.sha256(data).hexdigest()==checksum:
+                      Path("windows-build/source.tar.xz").write_bytes(data)
+                      print("Source SHA-256 verified")
+                      break
+              except (ValueError,base64.binascii.Error):
+                  pass
+          else: raise RuntimeError("Source checksum mismatch")
+          '@ | python -
+          tar -xJf windows-build/source.tar.xz -C windows-build
+          Copy-Item windows-find/find_addon.py windows-build/find_addon.py
+          Copy-Item windows-word/word_bridge.py windows-build/word_bridge.py
+          Copy-Item windows-word/test_word_bridge.py windows-build/test_word_bridge.py
+          @'
+          from pathlib import Path
+          p=Path("windows-build/pocket_highlighter.py")
+          s=p.read_text(encoding="utf-8")
+          guard='if __name__=="__main__":\n    main()\n'
+          assert s.count(guard)==1, "Main entry point mismatch"
+          s=s.replace(guard,"",1)
+          s += '\nfrom find_addon import install as _install_search\n_install_search(App)\nfrom find_addon import find_matches,summary\n'
+          s += '\nfrom word_bridge import install_word_bridge as _install_word_bridge\n_install_word_bridge(App)\n'
+          s += '\nif __name__=="__main__":\n    main()\n'
+          p.write_text(s,encoding="utf-8")
+          print("PASS: Ctrl+F and Word handoff installed before main window opens")
+          '@ | python -
+      - name: Install Windows app dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r windows-build/requirements.txt pyinstaller==6.16.0
+      - name: Run automated DOCX and app tests
+        working-directory: windows-build
+        shell: pwsh
+        run: |
+          python -m unittest -v test_pocket.py test_word_bridge.py
+          @'
+          import ast
+          from pathlib import Path
+          import pocket_highlighter as app
+          assert hasattr(app.App, "ctrl_find")
+          assert hasattr(app.App, "open_word_docx")
+          s=Path("pocket_highlighter.py").read_text(encoding="utf-8")
+          assert s.rfind("_install_search(App)") < s.rfind('if __name__=="__main__"')
+          assert s.rfind("_install_word_bridge(App)") < s.rfind('if __name__=="__main__"')
+          ast.parse(s)
+          print("PASS: search and Word actions installed before launch")
+          '@ | python -
+      - name: Build Windows one-file executable
+        working-directory: windows-build
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name PocketHighlighter_WordLayout --collect-all fitz --collect-all docx --hidden-import find_addon --hidden-import word_bridge pocket_highlighter.py
+          if (-not (Test-Path dist/PocketHighlighter_WordLayout.exe)) { throw 'EXE not built' }
+      - name: Smoke test compiled EXE on Windows
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path windows-build/dist/PocketHighlighter_WordLayout.exe).Path
+          $p=Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 9
+          if ($p.HasExited) { throw "EXE crashed or exited: $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Write-Output "PASS: Windows executable launches and stays running"
+      - name: Publish EXE to private build branch
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path windows-word/dist | Out-Null
+          Copy-Item windows-build/dist/PocketHighlighter_WordLayout.exe windows-word/dist/PocketHighlighter_WordLayout.exe
+          Get-FileHash windows-word/dist/PocketHighlighter_WordLayout.exe -Algorithm SHA256
+          (Get-Item windows-word/dist/PocketHighlighter_WordLayout.exe).Length
+          git config user.name "Pocket Highlighter Build Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add windows-word/dist/PocketHighlighter_WordLayout.exe
+          git commit -m "Add Windows app with native Word DOCX fidelity and fixed Ctrl+F"
+          git push origin HEAD:pocket-highlighter-windows-word-layout-20261112
