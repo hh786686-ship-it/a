@@ -1,0 +1,37 @@
+name: Build Pocket Highlighter APK
+on:
+  push:
+    branches:
+      - build-pocket-highlighter-20261112
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack Android source
+        shell: bash
+        run: |
+          cat pocket-build/source-parts/part{1,2,3,4}.txt | base64 --decode | tar -xJ -C pocket-build
+          test -f pocket-build/app/build.gradle
+          test -f pocket-build/app/src/main/AndroidManifest.xml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Build signed small APK
+        working-directory: pocket-build
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketHighlighter-APK
+          path: pocket-build/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
