@@ -1,0 +1,48 @@
+name: Build Pocket Highlighter 1.2 APK
+on:
+  push:
+    branches:
+      - pocket-highlighter-v12-20261112
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack v1.1 and apply v1.2 update
+        shell: bash
+        run: |
+          mkdir -p pocket-v2/build
+          cat pocket-v2/source/part{01,02,03,04,05,06}.txt | base64 --decode | tar -xJ -C pocket-v2/build
+          python3 pocket-v2/patch-v12.py
+          grep -q 'versionName .1.2.' pocket-v2/build/app/build.gradle
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          sdkmanager_path="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n1)"
+          "$sdkmanager_path" 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Compile v1.2 APK
+        working-directory: pocket-v2/build
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Verify and publish APK on isolated branch
+        shell: bash
+        run: |
+          mkdir -p pocket-v12/install
+          cp pocket-v2/build/app/build/outputs/apk/release/app-release.apk pocket-v12/install/PocketHighlighter_v1_2.apk
+          unzip -t pocket-v12/install/PocketHighlighter_v1_2.apk | tail -n 1
+          stat -c 'APK_SIZE_BYTES=%s' pocket-v12/install/PocketHighlighter_v1_2.apk
+          sha256sum pocket-v12/install/PocketHighlighter_v1_2.apk
+          git config user.name 'Pocket Highlighter Build Bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pocket-v12/install
+          git commit -m 'Add compiled Pocket Highlighter v1.2 APK'
+          git push origin HEAD:pocket-highlighter-v12-20261112
