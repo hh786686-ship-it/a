@@ -1,10 +1,11 @@
 # Moto e13 32-bit APK build report
 
-Status: **success**
+Status: **failure**
 
-Run: https://github.com/hh786686-ship-it/a/actions/runs/43202325497
+Run: https://github.com/hh786686-ship-it/a/actions/runs/43209538821
 
-Commit: 75b9d2496a3a4ff9342031fbeb88455806cab1c9
+Commit: 48b4073ab40bee570a4cffadafe6855b59a5e52b
+App source: v1.9.0 tag (overlay and Call Mode)
 
 
 ## setup.log
@@ -17,10 +18,10 @@ Commit: 75b9d2496a3a4ff9342031fbeb88455806cab1c9
 
 ## build.log
 
-    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1794480015963.json
+    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794482988127.json
     [Incubating] Problems report is available at: file:///home/runner/work/a/a/LiveChineseStream-A16/build/reports/problems/problems-report.html
     
-    BUILD SUCCESSFUL in 29s
+    BUILD SUCCESSFUL in 37s
     34 actionable tasks: 34 executed
 
 ### Last 25 log lines
@@ -45,59 +46,43 @@ Commit: 75b9d2496a3a4ff9342031fbeb88455806cab1c9
     > Task :app:packageDebug
     > Task :app:createDebugApkListingFileRedirect
     > Task :app:assembleDebug
-    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_3-1794480015963.json
+    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794482988127.json
     [Incubating] Problems report is available at: file:///home/runner/work/a/a/LiveChineseStream-A16/build/reports/problems/problems-report.html
     
-    BUILD SUCCESSFUL in 29s
+    BUILD SUCCESSFUL in 37s
     34 actionable tasks: 34 executed
 
 ## verify.log
 
+    other-services
+    supports-screens: 'small' 'normal' 'large' 'xlarge'
     supports-any-density: 'true'
-    locales:
-    densities:
     native-code: 'armeabi-v7a'
-    native-code: 'armeabi-v7a'
-      3376604  1981-01-01 01:01   lib/armeabi-v7a/libsherpa-onnx-jni.so
-     15026104  1981-01-01 01:01   lib/armeabi-v7a/libonnxruntime.so
-    161141793  1981-01-01 01:01   assets/model/encoder.int8.onnx
-      5165083  1981-01-01 01:01   assets/model/decoder.onnx
-      1033416  1981-01-01 01:01   assets/model/joiner.int8.onnx
 
 ### Last 25 log lines
 
+    Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+    Verified using v4 scheme (APK Signature Scheme v4): false
+    Verified for SourceStamp: false
     Number of signers: 1
-    package: name='com.example.livechinesea16' versionCode='10' versionName='1.7.0' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+    package: name='com.example.livechinesea16' versionCode='12' versionName='1.9.0-call-experimental' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
     sdkVersion:'28'
     targetSdkVersion:'34'
     uses-permission: name='android.permission.RECORD_AUDIO'
-    application: label='' icon=''
+    uses-permission: name='android.permission.SYSTEM_ALERT_WINDOW'
+    uses-permission: name='android.permission.FOREGROUND_SERVICE'
+    uses-permission: name='android.permission.FOREGROUND_SERVICE_MICROPHONE'
+    application-label:'Live Chinese Offline'
+    application: label='Live Chinese Offline' icon=''
     application-debuggable
     launchable-activity: name='com.example.livechinesea16.MainActivity'  label='' icon=''
     feature-group: label=''
       uses-feature: name='android.hardware.microphone'
       uses-feature: name='android.hardware.faketouch'
       uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'
+    provides-component:'accessibility'
     main
+    other-services
     supports-screens: 'small' 'normal' 'large' 'xlarge'
     supports-any-density: 'true'
-    locales:
-    densities:
     native-code: 'armeabi-v7a'
-    native-code: 'armeabi-v7a'
-      3376604  1981-01-01 01:01   lib/armeabi-v7a/libsherpa-onnx-jni.so
-     15026104  1981-01-01 01:01   lib/armeabi-v7a/libonnxruntime.so
-    161141793  1981-01-01 01:01   assets/model/encoder.int8.onnx
-      5165083  1981-01-01 01:01   assets/model/decoder.onnx
-      1033416  1981-01-01 01:01   assets/model/joiner.int8.onnx
-    -rw-r--r-- 1 runner runner 173M Nov 12 10:40 LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
-
-## publish.log
-
-    https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.1
-    {"assets":["LiveChineseOffline-MotoE13-32bit-v1.9.1.apk"],"url":"https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.1"}
-
-### Last 25 log lines
-
-    https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.1
-    {"assets":["LiveChineseOffline-MotoE13-32bit-v1.9.1.apk"],"url":"https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.1"}
