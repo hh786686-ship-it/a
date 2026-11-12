@@ -22,7 +22,25 @@ jobs:
           New-Item -ItemType Directory -Force -Path windows-build | Out-Null
           $parts = Get-Content -Raw windows-src/part0.txt,windows-src/part1.txt,windows-src/part2.txt
           $b64 = ($parts -join '').Trim()
-          [System.IO.File]::WriteAllBytes("windows-build/source.tar.xz",[Convert]::FromBase64String($b64))
+          $b64 | Set-Content -NoNewline windows-build/source.base64
+          @'
+          import base64, hashlib
+          from pathlib import Path
+          s=Path("windows-build/source.base64").read_text().strip()
+          wanted="abdb8cf3062675235e990c580ffea0cc618c5a47f66e3d7155582bd3f20795c1"
+          options=[s] if len(s)%4==0 else (s[:i]+s[i+1:] for i in range(len(s)))
+          for candidate in options:
+              try:
+                  data=base64.b64decode(candidate,validate=True)
+                  if hashlib.sha256(data).hexdigest()==wanted:
+                      Path("windows-build/source.tar.xz").write_bytes(data)
+                      print("PASS: source archive checksum matches")
+                      break
+              except (ValueError,base64.binascii.Error):
+                  pass
+          else:
+              raise RuntimeError("Source transfer checksum mismatch")
+          '@ | python -
           tar -xJf windows-build/source.tar.xz -C windows-build
           if (-not (Test-Path windows-build/pocket_highlighter.py)) { throw "Missing Windows source" }
       - name: Install build libraries
