@@ -22,43 +22,4 @@ jobs:
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            set -e
-            adb install pocket-build/install/PocketHighlighter.apk
-            adb shell am start -W -n com.pockethighlighter.reader/com.pockethighlighter.ReaderActivity
-            sleep 5
-            adb shell uiautomator dump /sdcard/window.xml
-            adb shell cat /sdcard/window.xml > initial.xml
-            python3 - <<'PY'
-            import xml.etree.ElementTree as E
-            t=E.parse('initial.xml')
-            nodes=list(t.iter('node'))
-            names=[x.attrib.get('content-desc','') for x in nodes]
-            texts=[x.attrib.get('text','') for x in nodes]
-            assert 'Open PDF or JPG' in names,(names,texts)
-            assert any('highlighter' in n.lower() for n in names),(names,texts)
-            print('PASS: app launched and Open/Highlighter controls are visible')
-            PY
-            MARK_COORDS=$(python3 - <<'PY'
-            import xml.etree.ElementTree as E,re
-            for n in E.parse('initial.xml').iter('node'):
-                if n.attrib.get('content-desc','')=='Toggle highlighter on right side':
-                    x1,y1,x2,y2=map(int,re.findall(r'\d+',n.attrib['bounds']))
-                    print((x1+x2)//2,(y1+y2)//2)
-                    break
-            else: raise SystemExit('Missing highlight button')
-            PY
-            )
-            adb shell input tap $MARK_COORDS
-            sleep 2
-            adb shell uiautomator dump /sdcard/window2.xml
-            adb shell cat /sdcard/window2.xml > highlighted.xml
-            python3 - <<'PY'
-            import xml.etree.ElementTree as E
-            names=[x.attrib.get('content-desc','') for x in E.parse('highlighted.xml').iter('node')]
-            for name in ['Yellow highlighter','Orange highlighter','Grey highlighter','Red highlighter','Highlighter thickness','Disable highlighter']:
-                assert name in names,('Missing '+name,names)
-            print('PASS: all four colours, width control and highlight toggle visible')
-            PY
-            adb logcat -d -t 3000 | grep -E 'FATAL EXCEPTION.*com.pockethighlighter.reader' && exit 1 || true
-            echo 'PASS: no app fatal exception detected during smoke test'
+          script: bash .github/scripts/test-pocket-highlighter.sh
