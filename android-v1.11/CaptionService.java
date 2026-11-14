@@ -84,7 +84,7 @@ public final class CaptionService extends Service {
     }
     private static OnlineRecognizer getWarmModel() {
         synchronized (WARM_LOCK) {
-            if (warmRecognizer == null) return null;
+            if (warmRecognizer == null || !warmCachedIdle) return null;
             warmCachedIdle = false;
             warmGeneration++;
             return warmRecognizer;
