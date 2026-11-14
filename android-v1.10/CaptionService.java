@@ -338,7 +338,7 @@ public final class CaptionService extends Service {
     public void stopListening() {
         pendingStart = false;
         listening = false;
-        setStatus("Microphone stopped · Overlay pinned");
+        setStatus("Microphone stopped · Overlay pinned (model ready for fast restart)");
         refreshNotification();
     }
 
@@ -597,7 +597,7 @@ public final class CaptionService extends Service {
         }
         // Retain much more history for scrolling, without layout work on the
         // entire transcript after a long session.
-        if (full.length() > 50000) full = full.substring(full.length() - 50000);
+        if (full.length() > 20000) full = full.substring(full.length() - 20000);
         int available = captions.getWidth() - captions.getPaddingLeft()
                 - captions.getPaddingRight();
         if (available <= dp(30)) available = overlayWidth() - dp(75);
@@ -636,7 +636,11 @@ public final class CaptionService extends Service {
         closing = true;
         pendingStart = false;
         listening = false;
-        // Shut down microphone and the foreground service, not just its window.
+        // Shut down the capture immediately; the decoder thread will release it.
+        AudioRecord active = microphone;
+        if (active != null) {
+            try { active.stop(); } catch (IllegalStateException ignored) {}
+        }
         persistTranscript();
         if (panel != null) {
             try { windows.removeViewImmediate(panel); }
