@@ -74,7 +74,7 @@ page=page.replace(marker, marker + '''
                             android.text.style.BackgroundColorSpan.class).length;
                     android.util.Log.i("LiveChineseA16", "QA_FIND_COUNT="
                             + findCount.getText() + " highlights=" + matches);
-                    if (fullTranscriptDialog == null) {
+                    if (false && fullTranscriptDialog == null) {
                         android.util.Log.i("LiveChineseA16", "QA_DIALOG_BEFORE");
                         openFullTranscript();
                         android.util.Log.i("LiveChineseA16", "QA_DIALOG_AFTER showing="
@@ -95,6 +95,35 @@ page=page.replace(marker, marker + '''
                     }
                 }
             }
+''')
+# Validate the full-screen dialog only after the Activity has returned to
+# the foreground and its bound service has supplied the latest transcript.
+flag='public final class MainActivity extends Activity implements CaptionService.Listener {'
+assert page.count(flag)==1
+page=page.replace(flag,flag+'\\n    private boolean qaDialogChecked = false;')
+ready='        if (callModeStatus != null) refreshCallModeStatus();'
+assert page.count(ready)==1
+page=page.replace(ready,ready+'''
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if (!qaDialogChecked && lastRenderedTranscript.contains("historyline14")) {
+                qaDialogChecked = true;
+                openFullTranscript();
+                if (fullTranscriptDialog != null && fullFindInput != null &&
+                        fullTranscriptView != null) {
+                    fullFindInput.setText("historyline07");
+                    findInFullTranscript();
+                    android.text.Spanned styled = (android.text.Spanned) fullTranscriptView.getText();
+                    int count = styled.getSpans(0, styled.length(),
+                            android.text.style.BackgroundColorSpan.class).length;
+                    android.util.Log.i("LiveChineseA16", "QA_FULL_SCREEN showing="
+                            + fullTranscriptDialog.isShowing() + " hasLatest="
+                            + styled.toString().contains("historyline14")
+                            + " highlights=" + count);
+                } else {
+                    android.util.Log.e("LiveChineseA16", "QA_FULL_SCREEN UI not attached");
+                }
+            }
+        }, 1500);
 ''')
 ui.write_text(page)
 manifest=base/"AndroidManifest.xml"
