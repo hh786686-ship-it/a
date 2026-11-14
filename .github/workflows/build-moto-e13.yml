@@ -5,7 +5,7 @@ on:
     paths:
       - '.github/workflows/build-moto-e13.yml'
       - 'LiveChineseStream-A16/**'
-      - 'android-v1.10/**'
+      - 'android-v1.11/**'
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Restore v1.9 source and apply v1.10 overlay/transcript updates
+      - name: Restore v1.9 source and apply v1.11 fast restart + transcript updates
         shell: bash
         run: |
           set -euo pipefail
@@ -27,10 +27,10 @@ jobs:
           test -f LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CallAudioAccessibilityService.java
           grep -q 'SYSTEM_ALERT_WINDOW' LiveChineseStream-A16/app/src/main/AndroidManifest.xml
           grep -q '1.9.0-call-experimental' LiveChineseStream-A16/app/build.gradle.kts
-          cp android-v1.10/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
-          cp android-v1.10/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
-          cp android-v1.10/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
-          echo 'Applied v1.10: stop-on-dismiss, warm pause, scrollback, live transcript, Find next.'
+          cp android-v1.11/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
+          cp android-v1.11/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
+          cp android-v1.11/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
+          echo 'Applied v1.11: 90-second model cache, full-screen scrollable live transcript and Find.'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -73,7 +73,7 @@ jobs:
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -20
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "native-code: 'armeabi-v7a'"
-            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName='1.10.0-live-transcript'"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName='1.11.0-fast-restart'"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -F "android.permission.SYSTEM_ALERT_WINDOW"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CaptionService"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CallAudioAccessibilityService"
@@ -93,11 +93,11 @@ jobs:
           set -euo pipefail
           {
             apk=LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
-            name=LiveChineseOffline-v1.10-MotoE13-Transcript-32bit.apk
+            name=LiveChineseOffline-v1.11-MotoE13-FastRestart-32bit.apk
             cp "$apk" "$RUNNER_TEMP/$name"
-            tag=moto-e13-v1.10.0
+            tag=moto-e13-v1.11.0
             if ! gh release view "$tag" >/dev/null 2>&1; then
-              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.10 - Moto e13 32-bit" --notes "Five-line floating subtitles with scrollback (swipe down for earlier text, swipe up to return, double-tap to live), full live transcript with Find next highlighting, explicit stop and foreground cleanup when overlay dragged to bottom, and warm model between Pause/Start while the service is active. Experimental Call Mode retained (acoustic microphone; not call audio). Android Go overlay limitations remain device-dependent. Unverified on real hardware." --prerelease
+              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.11 - Moto e13 32-bit" --notes "v1.11 adds 90-second process-local recognizer cache after overlay dismissal with microphone and foreground service stopped. New full-screen scrollable transcript dialog with live updates and Find next. Five-line floating subtitle scrollback preserved. Experimental Call Mode retained. Device may still reclaim cached recognizer; Android Go overlay limitations remain. Real phone battery/runtime not yet measured." --prerelease
             fi
             gh release upload "$tag" "$RUNNER_TEMP/$name" --clobber
             gh release view "$tag" --json url,assets --jq '{url:.url, assets:[.assets[].name]}'
@@ -116,7 +116,7 @@ jobs:
             echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
             echo "Commit: $GITHUB_SHA"
-            echo "App source: v1.9.0 plus android-v1.10 patches"
+            echo "App source: v1.9.0 plus android-v1.11 patches"
             echo
             for log in "$RUNNER_TEMP/setup.log" "$RUNNER_TEMP/build.log" "$RUNNER_TEMP/verify.log" "$RUNNER_TEMP/publish.log"; do
               if [ -f "$log" ]; then
