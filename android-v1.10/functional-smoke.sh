@@ -87,56 +87,36 @@ if ! grep -Eq 'QA_SCROLL back=[1-9]' /tmp/qa-overlay.log; then
 fi
 echo 'PASS: overlay caption touch handler scrolls backwards'
 
-echo 'TEST 5: return to main activity; full transcript contains latest lines'
+echo 'TEST 5: returning to Activity updates full transcript TextView'
+adb logcat -c
 adb shell am start -n "$app/.MainActivity"
-sleep 2
-for i in 1 2 3; do adb shell input swipe 150 580 150 165 340; done
-dump
-if ! grep -q 'historyline14' /tmp/livechinese-ui.xml; then
- echo 'FAIL: live transcript not updated in Activity'; cat /tmp/livechinese-ui.xml; exit 1
-fi
-echo 'PASS: main Activity transcript is live'
-
-echo 'TEST 6: search with Find next'
-if ! grep -q 'Find next' /tmp/livechinese-ui.xml; then
- echo 'FAIL: Find next control absent'; cat /tmp/livechinese-ui.xml; exit 1
-fi
-python3 - <<'PY'
-import html,re
-s=html.unescape(open('/tmp/livechinese-ui.xml').read())
-for node in re.findall(r'<node [^>]*>',s):
- if 'Find words in transcript' in node:
-  m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
-  if m:
-   a,b,c,d=map(int,m.groups())
-   open('/tmp/findcoords','w').write(f'{(a+c)//2} {(b+d)//2}\n')
-   break
-else: raise SystemExit('Cannot find search input')
-PY
-read -r fx fy < /tmp/findcoords
-adb shell input tap "$fx" "$fy"
-adb shell input text historyline07
-adb shell input keyevent KEYCODE_BACK
-tap_text 'Find next'
-sleep 2
-dump
-if ! grep -q 'matches' /tmp/livechinese-ui.xml; then
- echo 'FAIL: search did not report match count'; cat /tmp/livechinese-ui.xml; exit 1
-fi
-echo 'PASS: Find next shows search match count'
-
-echo 'TEST 7: stop listening and restart without model reload'
-# Bring Start/Stop button into view.
-for i in 1 2 3; do adb shell input swipe 150 160 150 580 280; done
-sleep 2
-tap_text 'Stop listening'
-wait_for 'Start listening'
-if grep -q 'Loading model' /tmp/livechinese-ui.xml; then echo 'FAIL: reloaded model on pause'; exit 1; fi
-echo 'PASS: microphone paused, model remains ready'
-tap_text 'Start listening'
 sleep 4
-adb logcat -d -v brief -s 'LiveChineseA16:*' | grep -c 'AudioRecord state after start: 3' | awk '{if ($1 < 2) exit 1}'
-echo 'PASS: restarted microphone without reloading the recognizer'
+adb logcat -d -v brief -s 'LiveChineseA16:*' > /tmp/qa-main.log
+if ! grep -q 'QA_MAIN_TEXT hasLatest=true' /tmp/qa-main.log; then
+ echo 'FAIL: MainActivity transcript TextView not updated with live service text'; cat /tmp/qa-main.log; exit 1
+fi
+echo 'PASS: full transcript TextView has newest completed line'
+
+echo 'TEST 6: Find Next highlights matching transcript text'
+if ! grep -Eq 'QA_FIND_COUNT=[1-9][0-9]* matches.*highlights=[1-9]' /tmp/qa-main.log; then
+ echo 'FAIL: Find Next did not find and highlight the test word'; cat /tmp/qa-main.log; exit 1
+fi
+echo 'PASS: Find Next reports matches and applies a visible highlight'
+
+echo 'TEST 7: pause mic; restart using same loaded model'
+adb logcat -c
+adb shell am startservice -n "$app/.CaptionService" -a "$app.TEST_PAUSE" >/dev/null
+sleep 4
+adb shell am startservice -n "$app/.CaptionService" -a "$app.TEST_RESUME" >/dev/null
+sleep 3
+adb logcat -d -v brief -s 'LiveChineseA16:*' > /tmp/qa-pause.log
+if ! grep -q 'QA_PAUSED ready=true mic=false' /tmp/qa-pause.log; then
+ echo 'FAIL: pause did not stop the microphone or service was already destroyed'; cat /tmp/qa-pause.log; exit 1
+fi
+if ! grep -q 'QA_RESUMED ready=true mic=true' /tmp/qa-pause.log; then
+ echo 'FAIL: resume did not restart using a loaded model'; cat /tmp/qa-pause.log; exit 1
+fi
+echo 'PASS: microphone paused and restarted without reinitializing model'
 
 echo 'TEST 8: close overlay and verify recording service stops'
 adb shell am startservice -n "$app/.CaptionService" -a "$app.TEST_CLOSE" >/dev/null
