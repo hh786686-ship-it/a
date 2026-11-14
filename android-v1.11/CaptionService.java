@@ -722,7 +722,26 @@ public final class CaptionService extends Service {
         // The recognizer stays cached for 90 seconds for a fast reopening.
         // Cache only while the process remains alive; it is automatically
         // discarded on Android process death.
-        idleWarmModel(recognizer);
+        // Wait for the decoder thread to finish before offering its recognizer
+        // to the next service instance. Otherwise old/new services could decode
+        // with the same native state simultaneously.
+        final OnlineRecognizer closingRecognizer = recognizer;
+        if (busy) {
+            main.postDelayed(new Runnable() {
+                private int attempts;
+                @Override public void run() {
+                    if (!busy) {
+                        idleWarmModel(closingRecognizer);
+                    } else if (++attempts < 100) {
+                        main.postDelayed(this, 100);
+                    } else {
+                        Log.w(LOG_TAG, "Busy decoder prevented warm-model caching");
+                    }
+                }
+            }, 100);
+        } else {
+            idleWarmModel(closingRecognizer);
+        }
         super.onDestroy();
     }
 }
