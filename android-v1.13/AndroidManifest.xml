@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ <uses-permission android:name="android.permission.RECORD_AUDIO" />
+ <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+ <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+ <uses-feature android:name="android.hardware.microphone" android:required="true" />
+ <application android:allowBackup="false" android:label="Live Chinese Offline"
+  android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="unspecified">
+   <intent-filter><action android:name="android.intent.action.MAIN" />
+    <category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+  </activity>
+  <service android:name=".ModelStandbyService" android:exported="false"
+   android:foregroundServiceType="specialUse">
+   <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+    android:value="User-initiated offline speech model standby with persistent notification and stop action; no microphone capture when idle" />
+  </service>
+  <service android:name=".CaptionService" android:exported="false"
+   android:foregroundServiceType="microphone" />
+  <service android:name=".CallAudioAccessibilityService"
+   android:label="@string/call_accessibility_title"
+   android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+   android:exported="true">
+   <intent-filter>
+    <action android:name="android.accessibilityservice.AccessibilityService" />
+   </intent-filter>
+   <meta-data android:name="android.accessibilityservice"
+    android:resource="@xml/call_accessibility_service" />
+  </service>
+ </application>
+</manifest>
