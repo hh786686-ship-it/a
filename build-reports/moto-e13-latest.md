@@ -2,9 +2,9 @@
 
 Status: **success**
 
-Run: https://github.com/hh786686-ship-it/a/actions/runs/43593852065
+Run: https://github.com/hh786686-ship-it/a/actions/runs/43595245687
 
-Commit: e5af29ae02e08c117485d097fdc6c2f32dca7bc0
+Commit: 2ee2ec5f9d6a2ac382f55bf4d8f5e4e21c11f2fd
 App source: v1.9.0 plus android-v1.10 patches
 
 
@@ -18,10 +18,10 @@ App source: v1.9.0 plus android-v1.10 patches
 
 ## build.log
 
-    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794658536388.json
+    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794659533024.json
     [Incubating] Problems report is available at: file:///home/runner/work/a/a/LiveChineseStream-A16/build/reports/problems/problems-report.html
     
-    BUILD SUCCESSFUL in 30s
+    BUILD SUCCESSFUL in 29s
     34 actionable tasks: 34 executed
 
 ### Last 25 log lines
@@ -46,10 +46,10 @@ App source: v1.9.0 plus android-v1.10 patches
     > Task :app:packageDebug
     > Task :app:createDebugApkListingFileRedirect
     > Task :app:assembleDebug
-    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794658536388.json
+    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794659533024.json
     [Incubating] Problems report is available at: file:///home/runner/work/a/a/LiveChineseStream-A16/build/reports/problems/problems-report.html
     
-    BUILD SUCCESSFUL in 30s
+    BUILD SUCCESSFUL in 29s
     34 actionable tasks: 34 executed
 
 ## verify.log
@@ -94,7 +94,7 @@ App source: v1.9.0 plus android-v1.10 patches
     161141793  1981-01-01 01:01   assets/model/encoder.int8.onnx
       5165083  1981-01-01 01:01   assets/model/decoder.onnx
       1033416  1981-01-01 01:01   assets/model/joiner.int8.onnx
-    -rw-r--r-- 1 runner runner 173M Nov 14 12:15 LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
+    -rw-r--r-- 1 runner runner 173M Nov 14 12:32 LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
 
 ## publish.log
 
