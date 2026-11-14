@@ -75,7 +75,12 @@ page=page.replace(marker, marker + '''
                     android.util.Log.i("LiveChineseA16", "QA_FIND_COUNT="
                             + findCount.getText() + " highlights=" + matches);
                     if (fullTranscriptDialog == null) {
+                        android.util.Log.i("LiveChineseA16", "QA_DIALOG_BEFORE");
                         openFullTranscript();
+                        android.util.Log.i("LiveChineseA16", "QA_DIALOG_AFTER showing="
+                                + (fullTranscriptDialog != null && fullTranscriptDialog.isShowing())
+                                + " view=" + (fullTranscriptView != null)
+                                + " input=" + (fullFindInput != null));
                         if (fullTranscriptView != null && fullFindInput != null) {
                             fullFindInput.setText("historyline07");
                             findInFullTranscript();
