@@ -39,6 +39,16 @@ text=text.replace(original,'''        if ("com.example.livechinesea16.TEST_INSER
             }
             return START_NOT_STICKY;
         }
+        if ("com.example.livechinesea16.TEST_PAUSE".equals(action)) {
+            stopListening();
+            Log.i(LOG_TAG, "QA_PAUSED ready=" + ready + " mic=" + listening);
+            return START_NOT_STICKY;
+        }
+        if ("com.example.livechinesea16.TEST_RESUME".equals(action)) {
+            startListening();
+            Log.i(LOG_TAG, "QA_RESUMED ready=" + ready + " mic=" + listening);
+            return START_NOT_STICKY;
+        }
         if ("com.example.livechinesea16.TEST_CLOSE".equals(action)) {
             closeOverlayAndStop();
             Log.i(LOG_TAG, "QA overlay close action executed");
@@ -46,6 +56,28 @@ text=text.replace(original,'''        if ("com.example.livechinesea16.TEST_INSER
         }
 ''' + original)
 source.write_text(text)
+# Add diagnostic logging to the actual Activity's live transcript update and
+# Find Next method, only in the disposable emulator test APK.
+ui=base/"java/com/example/livechinesea16/MainActivity.java"
+page=ui.read_text()
+marker='            renderTranscript(current);'
+assert page.count(marker)==1
+page=page.replace(marker, marker + '''
+            if (current.contains("historyline14")) {
+                android.util.Log.i("LiveChineseA16", "QA_MAIN_TEXT hasLatest="
+                        + transcriptView.getText().toString().contains("historyline14"));
+                if (findInput != null) {
+                    findInput.setText("historyline07");
+                    findNext();
+                    android.text.Spanned styled = (android.text.Spanned) transcriptView.getText();
+                    int matches = styled.getSpans(0, styled.length(),
+                            android.text.style.BackgroundColorSpan.class).length;
+                    android.util.Log.i("LiveChineseA16", "QA_FIND_COUNT="
+                            + findCount.getText() + " highlights=" + matches);
+                }
+            }
+''')
+ui.write_text(page)
 manifest=base/"AndroidManifest.xml"
 value=manifest.read_text()
 a='<service android:name=".CaptionService" android:exported="false"'
