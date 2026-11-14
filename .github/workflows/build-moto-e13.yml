@@ -102,39 +102,3 @@ jobs:
             gh release upload "$tag" "$RUNNER_TEMP/$name" --clobber
             gh release view "$tag" --json url,assets --jq '{url:.url, assets:[.assets[].name]}'
           } 2>&1 | tee "$RUNNER_TEMP/publish.log"
-      - name: Publish build diagnosis to repo
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build-reports
-          {
-            echo "# Moto e13 32-bit APK build report"
-            echo
-            echo "Status: **${{ job.status }}**"
-            echo
-            echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo
-            echo "Commit: $GITHUB_SHA"
-            echo "App source: v1.9.0 plus android-v1.11 patches"
-            echo
-            for log in "$RUNNER_TEMP/setup.log" "$RUNNER_TEMP/build.log" "$RUNNER_TEMP/verify.log" "$RUNNER_TEMP/publish.log"; do
-              if [ -f "$log" ]; then
-                echo
-                echo "## $(basename "$log")"
-                echo
-                grep -E -i -C 3 '(^|[[:space:]])error:|FAILURE:|what went wrong:|BUILD SUCCESSFUL|native-code:|lib/armeabi-v7a/|gh release|https://github.com/' "$log" | tail -n 95 | sed 's/^/    /' || true
-                echo
-                echo "### Last 25 log lines"
-                echo
-                tail -n 25 "$log" | sed 's/^/    /'
-              fi
-            done
-          } > build-reports/moto-e13-latest.md
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add build-reports/moto-e13-latest.md
-          if ! git diff --cached --quiet; then
-            git commit -m 'ci: record Moto e13 build result [skip ci]'
-            git push origin HEAD:main
-          fi
