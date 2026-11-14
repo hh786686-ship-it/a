@@ -38,7 +38,7 @@ for node in re.findall(r'<node [^>]*>',s):
         m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
         if m:
             a,b,c,d=map(int,m.groups())
-            open('/tmp/tapcoords','w').write(f'{(a+c)//2} {(b+d)//2}')
+            open('/tmp/tapcoords','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
             sys.exit(0)
 raise SystemExit("Cannot find button: "+label)
 PY
@@ -81,7 +81,7 @@ for node in re.findall(r'<node [^>]*>',s):
   m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
   if m:
    a,b,c,d=map(int,m.groups())
-   open('/tmp/swipe','w').write(f'{(a+c)//2} {(b+d)//2}')
+   open('/tmp/swipe','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
    break
 else:
  raise SystemExit('Cannot locate caption text bounds')
@@ -118,7 +118,7 @@ for node in re.findall(r'<node [^>]*>',s):
   m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
   if m:
    a,b,c,d=map(int,m.groups())
-   open('/tmp/findcoords','w').write(f'{(a+c)//2} {(b+d)//2}')
+   open('/tmp/findcoords','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
    break
 else: raise SystemExit('Cannot find search input')
 PY
