@@ -2,10 +2,10 @@
 
 Status: **success**
 
-Run: https://github.com/hh786686-ship-it/a/actions/runs/43209824408
+Run: https://github.com/hh786686-ship-it/a/actions/runs/43588139970
 
-Commit: 9fb4d5c6952df0be70e08ffe02cd838ceaa8eae4
-App source: v1.9.0 tag (overlay and Call Mode)
+Commit: 6ceca13cda111d31851740b79afad825347be946
+App source: v1.9.0 plus android-v1.10 patches
 
 
 ## setup.log
@@ -18,10 +18,10 @@ App source: v1.9.0 tag (overlay and Call Mode)
 
 ## build.log
 
-    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794483114377.json
+    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794654240043.json
     [Incubating] Problems report is available at: file:///home/runner/work/a/a/LiveChineseStream-A16/build/reports/problems/problems-report.html
     
-    BUILD SUCCESSFUL in 20s
+    BUILD SUCCESSFUL in 41s
     34 actionable tasks: 34 executed
 
 ### Last 25 log lines
@@ -46,10 +46,10 @@ App source: v1.9.0 tag (overlay and Call Mode)
     > Task :app:packageDebug
     > Task :app:createDebugApkListingFileRedirect
     > Task :app:assembleDebug
-    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794483114377.json
+    gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1794654240043.json
     [Incubating] Problems report is available at: file:///home/runner/work/a/a/LiveChineseStream-A16/build/reports/problems/problems-report.html
     
-    BUILD SUCCESSFUL in 20s
+    BUILD SUCCESSFUL in 41s
     34 actionable tasks: 34 executed
 
 ## verify.log
@@ -58,7 +58,7 @@ App source: v1.9.0 tag (overlay and Call Mode)
     supports-screens: 'small' 'normal' 'large' 'xlarge'
     supports-any-density: 'true'
     native-code: 'armeabi-v7a'
-    package: name='com.example.livechinesea16' versionCode='12' versionName='1.9.0-call-experimental' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+    package: name='com.example.livechinesea16' versionCode='14' versionName='1.10.0-live-transcript' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
     uses-permission: name='android.permission.SYSTEM_ALERT_WINDOW'
             A: android:name(0x01010003)="com.example.livechinesea16.CaptionService" (Raw: "com.example.livechinesea16.CaptionService")
             A: android:name(0x01010003)="com.example.livechinesea16.CallAudioAccessibilityService" (Raw: "com.example.livechinesea16.CallAudioAccessibilityService")
@@ -85,7 +85,7 @@ App source: v1.9.0 tag (overlay and Call Mode)
     supports-screens: 'small' 'normal' 'large' 'xlarge'
     supports-any-density: 'true'
     native-code: 'armeabi-v7a'
-    package: name='com.example.livechinesea16' versionCode='12' versionName='1.9.0-call-experimental' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+    package: name='com.example.livechinesea16' versionCode='14' versionName='1.10.0-live-transcript' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
     uses-permission: name='android.permission.SYSTEM_ALERT_WINDOW'
             A: android:name(0x01010003)="com.example.livechinesea16.CaptionService" (Raw: "com.example.livechinesea16.CaptionService")
             A: android:name(0x01010003)="com.example.livechinesea16.CallAudioAccessibilityService" (Raw: "com.example.livechinesea16.CallAudioAccessibilityService")
@@ -94,14 +94,14 @@ App source: v1.9.0 tag (overlay and Call Mode)
     161141793  1981-01-01 01:01   assets/model/encoder.int8.onnx
       5165083  1981-01-01 01:01   assets/model/decoder.onnx
       1033416  1981-01-01 01:01   assets/model/joiner.int8.onnx
-    -rw-r--r-- 1 runner runner 173M Nov 12 11:32 LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
+    -rw-r--r-- 1 runner runner 173M Nov 14 11:04 LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
 
 ## publish.log
 
-    https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.2
-    {"assets":["LiveChineseOffline-v1.9-MotoE13-Overlay-32bit.apk"],"url":"https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.2"}
+    https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.10.0
+    {"assets":["LiveChineseOffline-v1.10-MotoE13-Transcript-32bit.apk"],"url":"https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.10.0"}
 
 ### Last 25 log lines
 
-    https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.2
-    {"assets":["LiveChineseOffline-v1.9-MotoE13-Overlay-32bit.apk"],"url":"https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.9.2"}
+    https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.10.0
+    {"assets":["LiveChineseOffline-v1.10-MotoE13-Transcript-32bit.apk"],"url":"https://github.com/hh786686-ship-it/a/releases/tag/moto-e13-v1.10.0"}
