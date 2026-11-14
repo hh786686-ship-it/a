@@ -100,7 +100,7 @@ page=page.replace(marker, marker + '''
 # the foreground and its bound service has supplied the latest transcript.
 flag='public final class MainActivity extends Activity implements CaptionService.Listener {'
 assert page.count(flag)==1
-page=page.replace(flag,flag+'\\n    private boolean qaDialogChecked = false;')
+page=page.replace(flag,flag+'\n    private boolean qaDialogChecked = false;')
 ready='        if (callModeStatus != null) refreshCallModeStatus();'
 assert page.count(ready)==1
 page=page.replace(ready,ready+'''
