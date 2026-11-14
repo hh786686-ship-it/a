@@ -35,7 +35,7 @@ label=sys.argv[1]
 s=html.unescape(open('/tmp/livechinese-ui.xml').read())
 for node in re.findall(r'<node [^>]*>',s):
     if ('text="'+label+'"') in node:
-        m=re.search(r'bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"',node)
+        m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
         if m:
             a,b,c,d=map(int,m.groups())
             open('/tmp/tapcoords','w').write(f'{(a+c)//2} {(b+d)//2}')
@@ -78,7 +78,7 @@ import html,re
 s=html.unescape(open('/tmp/livechinese-ui.xml').read())
 for node in re.findall(r'<node [^>]*>',s):
  if 'historyline14' in node:
-  m=re.search(r'bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"',node)
+  m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
   if m:
    a,b,c,d=map(int,m.groups())
    open('/tmp/swipe','w').write(f'{(a+c)//2} {(b+d)//2}')
@@ -115,7 +115,7 @@ import html,re
 s=html.unescape(open('/tmp/livechinese-ui.xml').read())
 for node in re.findall(r'<node [^>]*>',s):
  if 'Find words in transcript' in node:
-  m=re.search(r'bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"',node)
+  m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
   if m:
    a,b,c,d=map(int,m.groups())
    open('/tmp/findcoords','w').write(f'{(a+c)//2} {(b+d)//2}')
