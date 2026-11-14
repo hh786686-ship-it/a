@@ -2,6 +2,7 @@
 # End-to-end Android emulator UI/service regression test of v1.10.
 # This script is only run against a CI-only x86_64 APK with an injected test transcript action.
 set -euo pipefail
+trap 'echo "TEST FAILED at line $LINENO ($BASH_COMMAND)"; if [ -f /tmp/livechinese-ui.xml ]; then tail -c 1800 /tmp/livechinese-ui.xml; fi' ERR
 app=com.example.livechinesea16
 apk="$RUNNER_TEMP/LiveChineseOffline-qa-x86_64.apk"
 adb install -r "$apk"
@@ -38,7 +39,7 @@ for node in re.findall(r'<node [^>]*>',s):
         m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
         if m:
             a,b,c,d=map(int,m.groups())
-            open('/tmp/tapcoords','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
+            open('/tmp/tapcoords','w').write(f'{(a+c)//2} {(b+d)//2}\n')
             sys.exit(0)
 raise SystemExit("Cannot find button: "+label)
 PY
@@ -81,7 +82,7 @@ for node in re.findall(r'<node [^>]*>',s):
   m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
   if m:
    a,b,c,d=map(int,m.groups())
-   open('/tmp/swipe','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
+   open('/tmp/swipe','w').write(f'{(a+c)//2} {(b+d)//2}\n')
    break
 else:
  raise SystemExit('Cannot locate caption text bounds')
@@ -118,7 +119,7 @@ for node in re.findall(r'<node [^>]*>',s):
   m=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',node)
   if m:
    a,b,c,d=map(int,m.groups())
-   open('/tmp/findcoords','w').write(f'{(a+c)//2} {(b+d)//2}\\n')
+   open('/tmp/findcoords','w').write(f'{(a+c)//2} {(b+d)//2}\n')
    break
 else: raise SystemExit('Cannot find search input')
 PY
