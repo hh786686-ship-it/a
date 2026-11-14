@@ -410,7 +410,7 @@ public final class MainActivity extends Activity implements CaptionService.Liste
     private void renderHighlightedMatch() {
         // Force a redraw of the highlight without discarding the transcript.
         String current = lastRenderedTranscript;
-        lastRenderedTranscript = "\u0000";
+        lastRenderedTranscript = "__redraw_transcript__";
         renderTranscript(current);
     }
     private void beginListening() {
