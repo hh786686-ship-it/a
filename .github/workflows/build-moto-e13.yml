@@ -5,7 +5,7 @@ on:
     paths:
       - '.github/workflows/build-moto-e13.yml'
       - 'LiveChineseStream-A16/**'
-      - 'android-v1.13/**'
+      - 'android-v1.14/**'
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Restore v1.9 source and apply v1.13 optional standby + transcript updates
+      - name: Restore v1.9 source and apply v1.14 Android Go no-overlay support
         shell: bash
         run: |
           set -euo pipefail
@@ -27,12 +27,12 @@ jobs:
           test -f LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CallAudioAccessibilityService.java
           grep -q 'SYSTEM_ALERT_WINDOW' LiveChineseStream-A16/app/src/main/AndroidManifest.xml
           grep -q '1.9.0-call-experimental' LiveChineseStream-A16/app/build.gradle.kts
-          cp android-v1.13/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
-          cp android-v1.13/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
-          cp android-v1.13/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
+          cp android-v1.14/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
+          cp android-v1.14/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
+          cp android-v1.14/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
           cp android-v1.13/AndroidManifest.xml LiveChineseStream-A16/app/src/main/AndroidManifest.xml
           cp android-v1.13/ModelStandbyService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/ModelStandbyService.java
-          echo 'Applied v1.13: opt-in persistent standby notification, process-local model cache, scrollable transcript.'
+          echo 'Applied v1.14: recording starts with overlay denied, in-app live transcript, optional standby.'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -75,7 +75,7 @@ jobs:
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -20
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "native-code: 'armeabi-v7a'"
-            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName='1.13.0-background-standby'"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName='1.14.0-android-go-no-overlay'"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -F "android.permission.SYSTEM_ALERT_WINDOW"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CaptionService"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CallAudioAccessibilityService"
@@ -95,11 +95,11 @@ jobs:
           set -euo pipefail
           {
             apk=LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
-            name=LiveChineseOffline-v1.13-MotoE13-Standby-32bit.apk
+            name=LiveChineseOffline-v1.14-MotoE13-AndroidGo-32bit.apk
             cp "$apk" "$RUNNER_TEMP/$name"
-            tag=moto-e13-v1.13.0
+            tag=moto-e13-v1.14.0
             if ! gh release view "$tag" >/dev/null 2>&1; then
-              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.13 - Moto e13 32-bit" --notes "v1.13 adds an opt-in persistent foreground model standby using a specialUse service, visible notification and Stop standby action. Standby itself holds no wakelock or microphone; model is cached while Android keeps the process. Existing live transcript/search and overlay scroll retained. Android can still reclaim process, and battery impact not measured on Moto e13. For personal sideload use; specialUse FGS may need policy review for Play distribution." --prerelease
+              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.14 - Moto e13 Android Go" --notes "v1.14 fixes Start listening on Android Go when Display over other apps permission is blocked. Offline microphone recognition and the in-app live searchable transcript work without an overlay. Optional standby and full-screen transcript preserved. Floating captions are still subject to Android permission restrictions. Real Moto e13 testing pending." --prerelease
             fi
             gh release upload "$tag" "$RUNNER_TEMP/$name" --clobber
             gh release view "$tag" --json url,assets --jq '{url:.url, assets:[.assets[].name]}'
