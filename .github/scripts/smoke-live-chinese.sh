@@ -118,3 +118,73 @@ adb shell dumpsys window > /tmp/livechinese-windows-return.txt
 grep -q 'LiveChineseCaptionOverlay' /tmp/livechinese-windows-return.txt
 echo 'PASS: floating caption window persists after changing apps'
 
+
+echo 'Verifying optional Call Mode actually opens its microphone via the enabled AccessibilityService...'
+# Stop the normal recording but keep the caption service alive.
+adb shell input tap "$x" "$y"
+sleep 4
+# ADB-controlled emulator; on a real device the USER must enable this manually.
+adb shell settings put secure enabled_accessibility_services "$app/$app.CallAudioAccessibilityService"
+adb shell settings put secure accessibility_enabled 1
+connected=0
+for i in $(seq 1 15); do
+  adb logcat -d -v brief -s 'LiveChineseA16:*' > /tmp/callmode-a11y.log
+  if grep -q 'CallMode: AccessibilityService connected' /tmp/callmode-a11y.log; then
+    connected=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$connected" != 1 ]]; then
+  echo 'FAIL: opted-in accessibility service did not connect in emulator'
+  adb shell dumpsys accessibility | tail -100
+  exit 1
+fi
+echo 'PASS: user-enabled accessibility caption service connected'
+# Enable Call Mode using the same switch that a real user taps.
+adb shell uiautomator dump /sdcard/callmodeui.xml >/dev/null 2>&1
+adb shell cat /sdcard/callmodeui.xml > /tmp/callmodeui.xml
+python3 - <<'PY'
+import re
+s=open('/tmp/callmodeui.xml').read()
+m=re.search(r'text="Experimental Call Mode \(speakerphone\)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',s)
+if not m:
+    raise SystemExit('FAIL: cannot find Call Mode switch on Android UI')
+a,b,c,d=map(int,m.groups())
+open('/tmp/call-switch-coordinates','w').write(f'{(a+c)//2} {(b+d)//2}\n')
+PY
+read -r sx sy < /tmp/call-switch-coordinates
+echo "Turning on Call Mode at $sx,$sy"
+adb shell input tap "$sx" "$sy"
+sleep 2
+adb shell uiautomator dump /sdcard/callmodeenabled.xml >/dev/null 2>&1
+adb shell cat /sdcard/callmodeenabled.xml > /tmp/callmodeenabled.xml
+if ! grep -q 'Call Mode READY' /tmp/callmodeenabled.xml; then
+  echo 'FAIL: Call Mode READY not displayed after toggling switch'
+  cat /tmp/callmodeenabled.xml
+  exit 1
+fi
+adb shell input tap "$x" "$y"
+sleep 7
+adb logcat -d -v brief -s 'LiveChineseA16:*' > /tmp/callmode-recording.log
+if ! grep -q 'CallMode: VOICE_RECOGNITION microphone opened by AccessibilityService' /tmp/callmode-recording.log; then
+  echo 'FAIL: Call Mode did not open microphone using AccessibilityService'
+  tail -100 /tmp/callmode-recording.log
+  exit 1
+fi
+if ! grep -q 'AudioRecord state after start: 3' /tmp/callmode-recording.log; then
+  echo 'FAIL: call-mode microphone did not enter RECORDING'
+  tail -100 /tmp/callmode-recording.log
+  exit 1
+fi
+echo 'PASS: accessibility voice-recognition microphone reached RECORDING'
+adb shell input keyevent KEYCODE_HOME
+sleep 4
+adb shell dumpsys window > /tmp/callmode-windows-home.txt
+if ! grep -q 'LiveChineseCaptionOverlay' /tmp/callmode-windows-home.txt; then
+  echo 'FAIL: call-mode overlay disappeared on Home'
+  exit 1
+fi
+echo 'PASS: call-mode floating overlay persists on Home screen'
+# No emulator simulated phone call: real A16 speakerphone capture and incoming speech remain unverified.
+echo 'NOTE: call downlink, Samsung acoustic echo cancellation, and incoming voice were NOT tested'

@@ -1,0 +1,42 @@
+name: Publish Live Chinese v1.9 Experimental Call Mode APK
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-live-chinese-v1.9.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Download latest emulator-tested APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified
+          gh run download 42504121878 --repo "${{ github.repository }}" --name LiveChineseOffline-A16-APK --dir verified
+          test -f verified/LiveChineseOffline-A16.apk
+          test $(wc -c < verified/LiveChineseOffline-A16.apk) -gt 150000000
+          mv verified/LiveChineseOffline-A16.apk verified/LiveChineseOffline-v1.9-CallMode-ARM64.apk
+          unzip -t verified/LiveChineseOffline-v1.9-CallMode-ARM64.apk | tail -2
+          unzip -l verified/LiveChineseOffline-v1.9-CallMode-ARM64.apk | grep 'assets/model/encoder.int8.onnx'
+          unzip -l verified/LiveChineseOffline-v1.9-CallMode-ARM64.apk | grep 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          sha256sum verified/LiveChineseOffline-v1.9-CallMode-ARM64.apk
+
+      - name: Publish direct APK as GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create v1.9.0 verified/LiveChineseOffline-v1.9-CallMode-ARM64.apk \
+            --repo "${{ github.repository }}" \
+            --target 5090485b876186670779d1053512a0e96045a6dd \
+            --title 'Live Chinese Offline v1.9 — Experimental Call Mode' \
+            --notes 'Offline Android 9+ ARM64 Mandarin-only streaming Zipformer with persistent grey five-line floating subtitles, six-dot drag, font pinch zoom, and in-app size controls. Adds optional Call Mode using a user-enabled Accessibility Service and VOICE_RECOGNITION microphone for attempts at acoustic speakerphone transcription while another app uses the mic. IMPORTANT: NO access to the digital incoming call audio; incoming voice from speakerphone and your own voice may be captured, or may be suppressed by device echo cancellation. No phone-call capture guaranteed. Real Samsung A16 incoming-call transcription, accuracy and latency NOT verified. Emulator test run 42504121878 passed signed APK, model initialization, microphone, AccessibilityService connection, voice-recognition AudioRecord reaching RECORDING, and floating overlay persisting across Home. Grant microphone and draw-over-apps permissions, enable Call Mode and Live Chinese Call Listening accessibility service, then turn on speakerphone. No internet permission. Mandarin only, English not supported.'
+          gh release view v1.9.0 --repo "${{ github.repository }}" --json url,assets
