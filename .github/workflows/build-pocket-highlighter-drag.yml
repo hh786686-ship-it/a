@@ -45,6 +45,12 @@ jobs:
           unzip -t pocket-drag/output/PocketHighlighter_v1_3.apk | tail -n1
           stat -c 'APK_SIZE_BYTES=%s' pocket-drag/output/PocketHighlighter_v1_3.apk
           sha256sum pocket-drag/output/PocketHighlighter_v1_3.apk
+      - name: Enable KVM hardware acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - name: Android 13 emulator drag test
         uses: reactivecircus/android-emulator-runner@v2
         with:
