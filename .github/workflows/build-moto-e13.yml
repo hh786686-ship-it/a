@@ -5,7 +5,7 @@ on:
     paths:
       - '.github/workflows/build-moto-e13.yml'
       - 'LiveChineseStream-A16/**'
-      - 'android-v1.14/**'
+      - 'android-v1.15/**'
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Restore v1.9 source and apply v1.14 Android Go no-overlay support
+      - name: Restore v1.9 source and apply v1.15 screen-awake fix
         shell: bash
         run: |
           set -euo pipefail
@@ -27,12 +27,12 @@ jobs:
           test -f LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CallAudioAccessibilityService.java
           grep -q 'SYSTEM_ALERT_WINDOW' LiveChineseStream-A16/app/src/main/AndroidManifest.xml
           grep -q '1.9.0-call-experimental' LiveChineseStream-A16/app/build.gradle.kts
-          cp android-v1.14/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
-          cp android-v1.14/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
-          cp android-v1.14/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
+          cp android-v1.15/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
+          cp android-v1.15/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
+          cp android-v1.15/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
           cp android-v1.13/AndroidManifest.xml LiveChineseStream-A16/app/src/main/AndroidManifest.xml
           cp android-v1.13/ModelStandbyService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/ModelStandbyService.java
-          echo 'Applied v1.14: recording starts with overlay denied, in-app live transcript, optional standby.'
+          echo 'Applied v1.15: keep-screen-on for visible Activity and full transcript dialog, Android Go transcription retained.'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -75,7 +75,7 @@ jobs:
             "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | head -20
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "native-code: 'armeabi-v7a'"
-            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName='1.14.0-android-go-no-overlay'"
+            "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" | grep -F "versionName='1.15.0-screen-awake'"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$apk" | grep -F "android.permission.SYSTEM_ALERT_WINDOW"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CaptionService"
             "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml | grep -F "com.example.livechinesea16.CallAudioAccessibilityService"
@@ -95,11 +95,11 @@ jobs:
           set -euo pipefail
           {
             apk=LiveChineseStream-A16/app/build/outputs/apk/debug/app-debug.apk
-            name=LiveChineseOffline-v1.14-MotoE13-AndroidGo-32bit.apk
+            name=LiveChineseOffline-v1.15-MotoE13-ScreenAwake-32bit.apk
             cp "$apk" "$RUNNER_TEMP/$name"
-            tag=moto-e13-v1.14.0
+            tag=moto-e13-v1.15.0
             if ! gh release view "$tag" >/dev/null 2>&1; then
-              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.14 - Moto e13 Android Go" --notes "v1.14 fixes Start listening on Android Go when Display over other apps permission is blocked. Offline microphone recognition and the in-app live searchable transcript work without an overlay. Optional standby and full-screen transcript preserved. Floating captions are still subject to Android permission restrictions. Real Moto e13 testing pending." --prerelease
+              gh release create "$tag" --target "$GITHUB_SHA" --title "Live Chinese Offline v1.15 - Moto e13 Screen Awake" --notes "v1.15 keeps screen awake while MainActivity or full transcript dialog is visible via FLAG_KEEP_SCREEN_ON; normal screen timeout resumes when user leaves app. No wakelock or background screen forcing. Android Go no-overlay fallback, optional standby, and transcript search preserved. Screen uses extra battery while lit, and device-specific behavior remains unverified." --prerelease
             fi
             gh release upload "$tag" "$RUNNER_TEMP/$name" --clobber
             gh release view "$tag" --json url,assets --jq '{url:.url, assets:[.assets[].name]}'
