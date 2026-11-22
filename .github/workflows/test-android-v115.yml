@@ -1,0 +1,88 @@
+name: Functional test Live Chinese v1.15 on Android emulator
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android-v1.15/functional-smoke.sh'
+      - 'android-v1.15/inject-qa-hooks.py'
+      - '.github/workflows/test-android-v115.yml'
+permissions:
+  contents: write
+jobs:
+  functional:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore v1.9 and apply tested v1.15 app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin tag v1.9.0
+          rm -rf LiveChineseStream-A16
+          git archive v1.9.0 LiveChineseStream-A16 | tar -x
+          cp android-v1.15/CaptionService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/CaptionService.java
+          cp android-v1.15/MainActivity.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/MainActivity.java
+          cp android-v1.15/build.gradle.kts LiveChineseStream-A16/app/build.gradle.kts
+          cp android-v1.13/AndroidManifest.xml LiveChineseStream-A16/app/src/main/AndroidManifest.xml
+          cp android-v1.13/ModelStandbyService.java LiveChineseStream-A16/app/src/main/java/com/example/livechinesea16/ModelStandbyService.java
+          python3 android-v1.15/inject-qa-hooks.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk=/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
+          yes | "$sdk" --licenses >/dev/null || true
+          "$sdk" 'platforms;android-35' 'build-tools;35.0.0' 2>&1 | tee "$RUNNER_TEMP/sdk.log"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Download the actual offline Mandarin model
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30/resolve/main'
+          dir=LiveChineseStream-A16/app/src/main/assets/model
+          mkdir -p "$dir"
+          for file in encoder.int8.onnx decoder.onnx joiner.int8.onnx tokens.txt; do
+            curl --fail --location --retry 5 --retry-delay 3 -o "$dir/$file" "$base/$file"
+          done
+          test "$(wc -c < "$dir/encoder.int8.onnx")" -gt 150000000
+      - name: Build QA-only x86_64 Android APK
+        shell: bash
+        working-directory: LiveChineseStream-A16
+        run: |
+          set -o pipefail
+          gradle --no-daemon -PsmokeAbi=x86_64 --stacktrace assembleDebug 2>&1 | tee "$RUNNER_TEMP/build.log"
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/LiveChineseOffline-qa-x86_64.apk"
+          unzip -Z1 "$RUNNER_TEMP/LiveChineseOffline-qa-x86_64.apk" | grep -F 'lib/x86_64/libsherpa-onnx-jni.so'
+      - name: Free disk space for Android emulator
+        shell: bash
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/share/swift
+          sudo rm -rf /usr/local/lib/android/sdk/ndk /usr/local/lib/android/sdk/cmake
+          rm -rf LiveChineseStream-A16/app/build/intermediates LiveChineseStream-A16/app/build/tmp LiveChineseStream-A16/.gradle
+          df -h /
+      - name: Enable KVM accelerator
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Functional emulator testing (mic, transcript, screen awake during Activity and dialog, release on HOME)
+        timeout-minutes: 18
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          ram-size: 4096M
+          heap-size: 768M
+          disk-size: 3G
+          emulator-options: -no-window -no-snapshot -no-boot-anim -gpu swiftshader_indirect
+          script: bash -o pipefail -c 'bash android-v1.15/functional-smoke.sh 2>&1 | tee "$RUNNER_TEMP/qa-functional.log"'
