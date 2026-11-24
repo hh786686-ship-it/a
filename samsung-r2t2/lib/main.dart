@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:crispasr/crispasr.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -153,6 +154,9 @@ class LiveCaptions extends StatefulWidget {
 }
 
 class _LiveCaptionsState extends State<LiveCaptions> {
+  static const _overlay = MethodChannel('livechinese/overlay');
+  bool _overlayVisible = false;
+
   final _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _micSub;
   ReceivePort? _updates;
@@ -173,6 +177,51 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     _worker?.kill(priority: Isolate.immediate);
     _updates?.close();
     super.dispose();
+  }
+
+  Future<void> _showOverlay() async {
+    try {
+      // Foreground microphone services must be started while the activity
+      // is visible and after microphone permission has been granted.
+      if (!await _recorder.hasPermission()) {
+        if (mounted) setState(() => _status = 'Please grant microphone permission first.');
+        return;
+      }
+      final allowed = await _overlay.invokeMethod<bool>('hasOverlayPermission') ?? false;
+      if (!allowed) {
+        await _overlay.invokeMethod('requestOverlayPermission');
+        if (mounted) setState(() => _status =
+          'Enable "Appear on top", return here, and tap Show overlay again.');
+        return;
+      }
+      await _overlay.invokeMethod('startOverlay');
+      _overlayVisible = true;
+      await _syncOverlay();
+      if (mounted) setState(() => _status =
+        'Floating overlay is visible. Start listening, then switch apps.');
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Overlay error: $e');
+    }
+  }
+
+  Future<void> _hideOverlay() async {
+    try {
+      await _overlay.invokeMethod('stopOverlay');
+      _overlayVisible = false;
+      if (mounted) setState(() => _status = 'Overlay closed.');
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Overlay close error: $e');
+    }
+  }
+
+  Future<void> _syncOverlay() async {
+    if (!_overlayVisible) return;
+    try {
+      await _overlay.invokeMethod('setCaptions', {'lines': _captions.rows});
+    } catch (_) {
+      // The overlay can be closed from its own controls at any time.
+      _overlayVisible = false;
+    }
   }
 
   Future<File> _modelPath() async {
@@ -272,6 +321,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
             case 'caption':
               if (_listening) {
                 setState(() => _captions.accept(message['text'] as String));
+                unawaited(_syncOverlay());
               }
               break;
           }
@@ -294,6 +344,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         await _recorder.stop();
         _send?.send({'op': 'stop', 'run': _run});
         if (mounted) setState(() { _listening = false; _status = 'Stopped'; });
+        // Keep the overlay visible to preserve the last subtitles.
         return;
       }
       if (!_loaded || _send == null) {
@@ -306,6 +357,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       }
       final nextRun = ++_run;
       _captions.reset();
+      unawaited(_syncOverlay());
       _send!.send({'op': 'start', 'run': nextRun});
       final audio = await _recorder.startStream(const RecordConfig(
         encoder: AudioEncoder.pcm16bits,
@@ -369,6 +421,10 @@ class _LiveCaptionsState extends State<LiveCaptions> {
             child: const Text('2. Load model')),
           ElevatedButton(onPressed: _toggleMic,
             child: Text(_listening ? 'Stop listening' : '3. Start listening')),
+          ElevatedButton(onPressed: _showOverlay,
+            child: const Text('4. Show floating overlay')),
+          ElevatedButton(onPressed: _hideOverlay,
+            child: const Text('Close overlay')),
         ]),
         Row(children: [
           const Icon(Icons.text_fields, color: Colors.white),
