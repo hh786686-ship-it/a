@@ -1,0 +1,31 @@
+name: Functional smoke test offline Mandarin HTML
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'offline-html-wasm/browser-smoke.js'
+      - '.github/workflows/test-offline-mandarin-html.yml'
+permissions:
+  contents: read
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download complete offline HTML bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download offline-mandarin-html-wasm-test-v1 -p 'LiveChineseOffline-HTML-WASM-Mandarin-Test.zip'
+          mkdir app && cd app && unzip -q ../LiveChineseOffline-HTML-WASM-Mandarin-Test.zip
+      - name: Install Chromium browser test dependencies
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install chromium
+      - name: Start localhost server and run offline browser functional test
+        run: |
+          cd app
+          python3 -m http.server 8000 --bind 127.0.0.1 >/tmp/chinese-http.log 2>&1 &
+          cd ..
+          node offline-html-wasm/browser-smoke.js
