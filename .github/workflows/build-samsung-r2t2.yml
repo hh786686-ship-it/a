@@ -1,6 +1,8 @@
 name: Build Samsung A16 Confucius4-R2T2 APK
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     branches:
       - build-r2t2-samsung-a16-20261124
@@ -26,6 +28,7 @@ jobs:
         run: |
           flutter create --platforms=android --project-name=r2t2_live_chinese --org=org.livechinese .
           cp android_overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          rm -f test/widget_test.dart
       - name: Install and verify Android engine
         working-directory: samsung-r2t2
         run: python3 scripts/prepare_android_libs.py
