@@ -1,77 +1,73 @@
 #!/usr/bin/env python3
+"""Package official sherpa-onnx bilingual Chinese/English WASM browser ASR demo."""
 from pathlib import Path
-import urllib.request, re, zipfile, hashlib
+import urllib.request, json, zipfile, hashlib, re
 root=Path('bundle'); root.mkdir(exist_ok=True)
-name='wasm-stream-zh-int8'
-hf='https://huggingface.co/datasets/jiangzhuo9357/sherpa-onnx-asr-models/resolve/main'
-demo='https://huggingface.co/spaces/jiangzhuo9357/sherpa-onnx-asr-demos/resolve/main/streaming.html'
-files=['sherpa-onnx-wasm-main-asr.js','sherpa-onnx-wasm-main-asr.wasm','sherpa-onnx-wasm-main-asr.data','sherpa-onnx-asr.js']
-def fetch(url,path):
+name='k2-fsa/web-assembly-asr-sherpa-onnx-zh-en'
+base='https://huggingface.co/spaces/'+name+'/resolve/main/'
+api='https://huggingface.co/api/spaces/'+name+'/tree/main?recursive=true'
+def request(url):
+    return urllib.request.Request(url, headers={'User-Agent':'Mozilla/5.0'})
+print('SPACE',name,flush=True)
+with urllib.request.urlopen(request(api),timeout=60) as r:
+    tree=json.load(r)
+print('SPACE_TREE',[(x.get('path'),x.get('size')) for x in tree][:100],flush=True)
+files=[]
+for item in tree:
+    path=item.get('path','')
+    if item.get('type')!='file' or '..' in path or path.startswith('.'): continue
+    if path.lower().endswith(('.html','.js','.css','.wasm','.data','.json','.txt','.svg','.png','.ico','.webp','.wav')):
+        files.append(path)
+assert files, 'No browser resources found in official Space'
+def fetch(url,dest):
+    dest.parent.mkdir(parents=True,exist_ok=True)
     print('GET',url,flush=True)
-    req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
-    with urllib.request.urlopen(req,timeout=180) as i,path.open('wb') as o:
+    with urllib.request.urlopen(request(url),timeout=300) as r, dest.open('wb') as o:
         while True:
-            c=i.read(1048576)
-            if not c: break
-            o.write(c)
-    n=path.stat().st_size
-    print('OK',path,n,flush=True)
-    if n<1000: raise RuntimeError('Bad download '+url)
-    return n
-fetch(demo,root/'index.html')
-page=(root/'index.html').read_text(encoding='utf-8')
-print('CDN BASE SOURCE:')
-for line in page.splitlines():
-    if any(x in line for x in ('CDN_BASE','URLSearchParams','stream-zh-int8')):
-        print(line[:260],flush=True)
-page,n=re.subn(r'(?m)^(\s*(?:const|let|var)\s+CDN_BASE\s*=).*?;',r'\1 "./";',page,count=1,flags=re.S)
-if n!=1:raise RuntimeError('Failed local-only CDN_BASE substitution; upstream source changed')
-if '</head>' not in page:raise RuntimeError('Missing </head>')
-page=page.replace('</head>',"""<script>
-if (!new URLSearchParams(location.search).has('model')) {
-  location.replace(location.pathname+'?model=stream-zh-int8');
-}
-</script>
-</head>""",1)
-page=page.replace('Streaming ASR Browser Demo','Live Chinese Offline — Mandarin (WASM)')
-(root/'index.html').write_text(page,encoding='utf-8')
-model=root/name; model.mkdir(exist_ok=True)
-# Diagnose the dataset's actual layout if files have moved.
-try:
-    req=urllib.request.Request('https://huggingface.co/api/datasets/jiangzhuo9357/sherpa-onnx-asr-models/tree/main?recursive=true&expand=false',headers={'User-Agent':'Mozilla/5.0'})
-    with urllib.request.urlopen(req,timeout=45) as response:
-        import json
-        catalog=json.load(response)
-    matches=[x.get('path') for x in catalog if name in x.get('path','')]
-    print('MODEL REPOSITORY FILES',matches[:30],flush=True)
-except Exception as e:print('Repository API probe failed:',repr(e),flush=True)
-for f in files:
-    n=fetch(f'{hf}/{name}/{f}',model/f)
-    if f.endswith('.data') and n<20000000: raise RuntimeError('Incomplete model')
-    if f.endswith('.wasm') and n<1000000: raise RuntimeError('Incomplete runtime')
-(root/'README.txt').write_text("""Live Chinese Offline — HTML + WebAssembly Mandarin model — EXPERIMENTAL
+            b=r.read(1024*1024)
+            if not b:break
+            o.write(b)
+    size=dest.stat().st_size
+    print('DOWNLOADED',dest,size,flush=True)
+    assert size>0,'Empty file '+str(dest)
+for file in files:
+    fetch(base+file,root/file)
+webpages=[p for p in root.glob('*.html') if p.name=='index.html']
+assert webpages,'No index.html in official Space'
+model_files=list(root.rglob('*.data'))
+wasm_files=list(root.rglob('*.wasm'))
+assert model_files and wasm_files, 'Missing WASM or model .data'
+assert max(p.stat().st_size for p in model_files)>20_000_000,'Data too small'
+assert max(p.stat().st_size for p in wasm_files)>1_000_000,'WASM too small'
+print('MAIN_HTML_SOURCE', (root/'index.html').read_text(errors='replace')[:3500],flush=True)
+(root/'README.txt').write_text("""EXPERIMENTAL OFFLINE MANDARIN HTML + WASM
+Official sherpa-onnx WebAssembly browser recognizer (Chinese + English).
+Contains actual model data (.data), WebAssembly interpreter (.wasm),
+JavaScript runtime and index.html. No remote speech service.
 
-Unzip the entire package. Keep index.html and wasm-stream-zh-int8 folder together.
-Uses a real local Chinese streaming Zipformer INT8 speech recognition model.
-No Web Speech API, no model download, no cloud speech recognition required once downloaded.
-Try on a PC first:
-  cd extracted-folder
-  python3 -m http.server 8000
-  Open http://localhost:8000 in Chrome.
-Microphone permission normally requires HTTPS or localhost. Directly opening
-file:///Downloads/index.html on Android may FAIL because browsers block
-file-origin XMLHttpRequests used to load the .wasm and .data files.
-On Android use an HTTPS host with offline cache or a local localhost server.
-This is NOT guaranteed to work from a lone file:/// HTML page.
-The 59 MB 2023 Mandarin model has UNSTATED upstream redistribution licensing
-and may run slowly or fail on a low-RAM Moto e13 browser.
-Source of demo: https://huggingface.co/spaces/jiangzhuo9357/sherpa-onnx-asr-demos
-Source of model: https://huggingface.co/datasets/jiangzhuo9357/sherpa-onnx-asr-models
-Native inference: https://github.com/k2-fsa/sherpa-onnx
+HOW TO TRY:
+1. Extract the entire ZIP. Keep all files and folders together.
+2. On a computer, open a terminal in the extracted folder.
+3. Run: python3 -m http.server 8000
+4. Visit: http://localhost:8000/ in Chrome; allow microphone.
+5. Disconnect the internet; local model inference should still work.
+
+ANDROID LIMITATION:
+Opening index.html directly from an Android Downloads file:// URL can
+block WASM model fetches and microphone permissions. Chrome generally requires
+HTTPS or an HTTP localhost server. This package does NOT automatically solve
+those browser restrictions: a trusted localhost server or a securely hosted PWA
+is needed for reliable Android microphone use.
+Low-memory Moto e13 speed and RAM are not tested. Entire model may require
+hundreds of MB RAM on top of the files on disk.
+The demo source and model are provided by the sherpa-onnx project:
+https://huggingface.co/spaces/k2-fsa/web-assembly-asr-sherpa-onnx-zh-en
+https://github.com/k2-fsa/sherpa-onnx
+Use for personal testing and observe upstream license terms.
 """)
-(root/'start-server.py').write_text("from http.server import ThreadingHTTPServer,SimpleHTTPRequestHandler\nprint('Open http://localhost:8000')\nThreadingHTTPServer(('127.0.0.1',8000),SimpleHTTPRequestHandler).serve_forever()\n")
+(root/'start-local-server.py').write_text("from http.server import ThreadingHTTPServer,SimpleHTTPRequestHandler\nprint('Open http://localhost:8000')\nThreadingHTTPServer(('127.0.0.1',8000),SimpleHTTPRequestHandler).serve_forever()\n")
 out=Path('LiveChineseOffline-HTML-WASM-Mandarin-Test.zip')
 with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=3,allowZip64=True) as z:
-    for f in root.rglob('*'):
-        if f.is_file():z.write(f,f.relative_to(root))
+    for p in root.rglob('*'):
+        if p.is_file():z.write(p,p.relative_to(root))
 print('ZIP',out.stat().st_size,hashlib.sha256(out.read_bytes()).hexdigest(),flush=True)
