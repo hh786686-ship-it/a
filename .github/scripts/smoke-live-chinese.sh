@@ -4,6 +4,7 @@ app='com.example.livechinesea16'
 apk="${RUNNER_TEMP}/LiveChineseOffline-x86_64.apk"
 adb install -r "$apk"
 adb shell pm grant "$app" android.permission.RECORD_AUDIO
+adb shell appops set "$app" SYSTEM_ALERT_WINDOW allow
 adb logcat -c
 adb shell svc power stayon true
 adb shell input keyevent KEYCODE_WAKEUP
@@ -101,3 +102,19 @@ if adb logcat -d -v brief | grep -q 'FATAL EXCEPTION'; then
   exit 1
 fi
 echo 'PASS: native model loaded and live microphone session started, no fatal exception'
+echo 'Checking that floating subtitles survive Home and silence...'
+adb shell input keyevent KEYCODE_HOME
+sleep 6
+adb shell dumpsys window > /tmp/livechinese-windows-home.txt
+if ! grep -q 'LiveChineseCaptionOverlay' /tmp/livechinese-windows-home.txt; then
+  echo 'FAIL: floating caption window missing after Home'
+  adb logcat -d -t 350 | tail -150
+  exit 1
+fi
+echo 'PASS: floating caption window persists over Home screen'
+adb shell am start -n "$app/.MainActivity"
+sleep 3
+adb shell dumpsys window > /tmp/livechinese-windows-return.txt
+grep -q 'LiveChineseCaptionOverlay' /tmp/livechinese-windows-return.txt
+echo 'PASS: floating caption window persists after changing apps'
+
