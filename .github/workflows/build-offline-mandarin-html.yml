@@ -1,0 +1,38 @@
+name: Build offline Mandarin HTML WASM test bundle
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'offline-html-wasm/**'
+      - '.github/workflows/build-offline-mandarin-html.yml'
+permissions:
+  contents: write
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download real Chinese browser model and create a standalone offline directory bundle
+        run: python3 offline-html-wasm/build_bundle.py
+      - name: Verify local assets, archive and model completeness
+        run: |
+          set -euo pipefail
+          grep -q 'stream-zh-int8' bundle/index.html
+          grep -Eq 'CDN_BASE *= *"\./"' bundle/index.html
+          test "$(wc -c < bundle/wasm-stream-zh-int8/sherpa-onnx-wasm-main-asr.data)" -gt 20000000
+          test "$(wc -c < bundle/wasm-stream-zh-int8/sherpa-onnx-wasm-main-asr.wasm)" -gt 1000000
+          unzip -t LiveChineseOffline-HTML-WASM-Mandarin-Test.zip | tail -3
+          ls -lh LiveChineseOffline-HTML-WASM-Mandarin-Test.zip bundle/wasm-stream-zh-int8/*
+      - name: Publish test ZIP to private GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=offline-mandarin-html-wasm-test-v1
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --title "Experimental Offline Mandarin HTML + WASM" --notes "Experimental Mandarin WASM with local HTML+model. Requires localhost or HTTPS for microphone and model loading; file:// may not work on Android Chrome. Offline at runtime; no cloud ASR. Moto e13 performance unverified. No stated model redistribution license. For personal evaluation." --prerelease
+          fi
+          gh release upload "$tag" LiveChineseOffline-HTML-WASM-Mandarin-Test.zip --clobber
+          gh release view "$tag" --json url,assets --jq '{url:.url,assets:[.assets[].name]}'
