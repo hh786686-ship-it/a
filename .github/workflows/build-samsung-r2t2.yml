@@ -44,7 +44,6 @@ jobs:
         working-directory: samsung-r2t2
         run: flutter build apk --release --target-platform android-arm64
       - name: Publish APK as a GitHub release (no artifact quota)
-        if: github.event_name == 'push'
         working-directory: samsung-r2t2
         env:
           GH_TOKEN: ${{ github.token }}
