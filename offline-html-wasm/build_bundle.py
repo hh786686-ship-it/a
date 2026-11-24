@@ -3,7 +3,7 @@
 from pathlib import Path
 import urllib.request, json, zipfile, hashlib, re
 root=Path('bundle'); root.mkdir(exist_ok=True)
-name='k2-fsa/web-assembly-asr-sherpa-onnx-zh-en'
+name='k2-fsa/web-assembly-vad-asr-sherpa-onnx-zh-zipformer-ctc'
 base='https://huggingface.co/spaces/'+name+'/resolve/main/'
 api='https://huggingface.co/api/spaces/'+name+'/tree/main?recursive=true'
 def request(url):
@@ -41,7 +41,7 @@ assert max(p.stat().st_size for p in model_files)>20_000_000,'Data too small'
 assert max(p.stat().st_size for p in wasm_files)>1_000_000,'WASM too small'
 print('MAIN_HTML_SOURCE', (root/'index.html').read_text(errors='replace')[:3500],flush=True)
 (root/'README.txt').write_text("""EXPERIMENTAL OFFLINE MANDARIN HTML + WASM
-Official sherpa-onnx WebAssembly browser recognizer (Chinese + English).
+Official sherpa-onnx WebAssembly browser recognizer (Mandarin).
 Contains actual model data (.data), WebAssembly interpreter (.wasm),
 JavaScript runtime and index.html. No remote speech service.
 
@@ -61,7 +61,7 @@ is needed for reliable Android microphone use.
 Low-memory Moto e13 speed and RAM are not tested. Entire model may require
 hundreds of MB RAM on top of the files on disk.
 The demo source and model are provided by the sherpa-onnx project:
-https://huggingface.co/spaces/k2-fsa/web-assembly-asr-sherpa-onnx-zh-en
+https://huggingface.co/spaces/k2-fsa/web-assembly-vad-asr-sherpa-onnx-zh-zipformer-ctc
 https://github.com/k2-fsa/sherpa-onnx
 Use for personal testing and observe upstream license terms.
 """)
