@@ -28,6 +28,8 @@ jobs:
         run: |
           flutter create --platforms=android --project-name=r2t2_live_chinese --org=org.livechinese .
           cp android_overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          cp android_overrides/MainActivity.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/MainActivity.kt
+          cp android_overrides/SubtitleOverlayService.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/SubtitleOverlayService.kt
           rm -f test/widget_test.dart
       - name: Install and verify Android engine
         working-directory: samsung-r2t2
@@ -42,14 +44,13 @@ jobs:
         working-directory: samsung-r2t2
         run: flutter build apk --release --target-platform android-arm64
       - name: Publish APK as a GitHub release (no artifact quota)
-        if: github.event_name == 'push'
         working-directory: samsung-r2t2
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.2.0 \
+          gh release create samsung-r2t2-a16-v0.3.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.2.0" \
-            --notes "Experimental offline ARM64 Mandarin captions. Requires a separate phone on speaker. Downloads model after installation. Not device-tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.3.0" \
+            --notes "Experimental ARM64 Mandarin five-line floating subtitle overlay. Requires a separate phone on speaker. Downloads model after installation. Not device-tested." \
             --prerelease
