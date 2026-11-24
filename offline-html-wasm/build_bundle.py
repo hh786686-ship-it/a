@@ -36,6 +36,15 @@ if (!new URLSearchParams(location.search).has('model')) {
 page=page.replace('Streaming ASR Browser Demo','Live Chinese Offline — Mandarin (WASM)')
 (root/'index.html').write_text(page,encoding='utf-8')
 model=root/name; model.mkdir(exist_ok=True)
+# Diagnose the dataset's actual layout if files have moved.
+try:
+    req=urllib.request.Request('https://huggingface.co/api/datasets/jiangzhuo9357/sherpa-onnx-asr-models/tree/main?recursive=true&expand=false',headers={'User-Agent':'Mozilla/5.0'})
+    with urllib.request.urlopen(req,timeout=45) as response:
+        import json
+        catalog=json.load(response)
+    matches=[x.get('path') for x in catalog if name in x.get('path','')]
+    print('MODEL REPOSITORY FILES',matches[:30],flush=True)
+except Exception as e:print('Repository API probe failed:',repr(e),flush=True)
 for f in files:
     n=fetch(f'{hf}/{name}/{f}',model/f)
     if f.endswith('.data') and n<20000000: raise RuntimeError('Incomplete model')
