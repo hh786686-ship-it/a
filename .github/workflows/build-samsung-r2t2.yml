@@ -10,7 +10,7 @@ on:
       - 'samsung-r2t2/**'
       - '.github/workflows/build-samsung-r2t2.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -41,10 +41,15 @@ jobs:
       - name: Build installable ARM64 APK
         working-directory: samsung-r2t2
         run: flutter build apk --release --target-platform android-arm64
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: LiveChinese-R2T2-Samsung-A16-APK
-          path: samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 30
+      - name: Publish APK as a GitHub release (no artifact quota)
+        if: github.event_name == 'push'
+        working-directory: samsung-r2t2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create samsung-r2t2-a16-v0.2.0 \
+            build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
+            --target "$GITHUB_SHA" \
+            --title "Live Chinese R2T2 – Samsung A16 v0.2.0" \
+            --notes "Experimental offline ARM64 Mandarin captions. Requires a separate phone on speaker. Downloads model after installation. Not device-tested." \
+            --prerelease
