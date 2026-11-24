@@ -110,6 +110,13 @@ class SubtitleOverlayService : Service() {
         }
         action("−") { fontSize = (fontSize - 2f).coerceAtLeast(14f); labels.forEach { it.textSize = fontSize } }
         action("+") { fontSize = (fontSize + 2f).coerceAtMost(40f); labels.forEach { it.textSize = fontSize } }
+        action("↔") {
+            widthDp = if (widthDp >= 390) 260 else widthDp + 40
+            params?.let { p ->
+                p.width = dp(widthDp)
+                bubble?.let { manager.updateViewLayout(it, p) }
+            }
+        }
         action("◐") {
             overlayOpacity = if (overlayOpacity > 0.5f) 0.28f else 0.82f
             root.setBackgroundColor(Color.argb((overlayOpacity * 255).roundToInt(), 13, 19, 31))
