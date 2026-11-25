@@ -20,6 +20,7 @@ import android.text.TextUtils
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.FrameLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -43,6 +44,7 @@ class SubtitleOverlayService : Service() {
     private var params: WindowManager.LayoutParams? = null
     private var captionsBox: LinearLayout? = null
     private var alphaControls: LinearLayout? = null
+    private var toolbarControls: LinearLayout? = null
     private var lastLines: List<String> = emptyList()
     private var visibleRows = 5
     private var labels: List<TextView> = emptyList()
@@ -62,7 +64,7 @@ class SubtitleOverlayService : Service() {
         fontSize = preferences.getFloat("font", 23f).coerceIn(8f, 40f)
         overlayOpacity = preferences.getFloat("opacity", 0.82f).coerceIn(0.15f, 1f)
         widthDp = preferences.getInt("width", 340).coerceIn(100, 1200)
-        heightDp = preferences.getInt("height", 345).coerceIn(64, 1400)
+        heightDp = preferences.getInt("height", 345).coerceIn(minHeightDp(), 1400)
         leftPx = preferences.getInt("x", -1)
         topPx = preferences.getInt("y", -1)
 
@@ -121,16 +123,20 @@ class SubtitleOverlayService : Service() {
             gravity = Gravity.CENTER_VERTICAL
         }
 
+    private fun minHeightDp(): Int =
+        (fontSize * resources.displayMetrics.scaledDensity / density * 1.35f + 4f)
+            .roundToInt().coerceAtLeast(20)
+
     private fun maxWidthDp(): Int = (resources.displayMetrics.widthPixels / density).toInt()
         .coerceAtLeast(100)
     private fun maxHeightDp(): Int = (resources.displayMetrics.heightPixels / density).toInt()
-        .coerceAtLeast(64)
+        .coerceAtLeast(minHeightDp())
 
     private fun resizeWindow(newWidthDp: Int, newHeightDp: Int) {
         val p = params ?: return
         val view = bubble ?: return
         widthDp = newWidthDp.coerceIn(100, maxWidthDp())
-        heightDp = newHeightDp.coerceIn(64, maxHeightDp())
+        heightDp = newHeightDp.coerceIn(minHeightDp(), maxHeightDp())
         p.width = dp(widthDp)
         p.height = dp(heightDp)
         p.x = p.x.coerceIn(0, (resources.displayMetrics.widthPixels - p.width).coerceAtLeast(0))
@@ -141,12 +147,12 @@ class SubtitleOverlayService : Service() {
 
     private fun showOverlay() {
         widthDp = widthDp.coerceIn(100, maxWidthDp())
-        heightDp = heightDp.coerceIn(64, maxHeightDp())
+        heightDp = heightDp.coerceIn(minHeightDp(), maxHeightDp())
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.argb((overlayOpacity * 255).roundToInt(), 70, 70, 70))
-            setPadding(dp(5), dp(2), dp(5), dp(2))
+            setPadding(dp(2), dp(1), dp(2), dp(1))
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -205,8 +211,8 @@ class SubtitleOverlayService : Service() {
         alphaRow.addView(alpha, LinearLayout.LayoutParams(0, dp(31), 1f))
 
         action("×") { stopSelf() }
-        toolbar.addView(drag, LinearLayout.LayoutParams(0, dp(24), 1f))
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(24)))
+        toolbarControls = toolbar
         root.addView(alphaRow, LinearLayout.LayoutParams(-1, dp(31)))
         alphaControls = alphaRow
 
@@ -221,20 +227,22 @@ class SubtitleOverlayService : Service() {
                 body.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
             }
         }
-        root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        val content = FrameLayout(this)
+        content.addView(body, FrameLayout.LayoutParams(-1, -1).apply { rightMargin = dp(32) })
+        root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val resizeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        }
         val sizeLabel = text("⇲", 16f).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             setTextColor(Color.CYAN)
         }
         sizeLabel.contentDescription = "Drag corner to resize width and height"
         sizeLabel.setPadding(0, 0, dp(2), 0)
-        resizeRow.addView(sizeLabel, LinearLayout.LayoutParams(dp(40), dp(20)))
-        root.addView(resizeRow, LinearLayout.LayoutParams(-1, dp(20)))
+        content.addView(drag, FrameLayout.LayoutParams(dp(15), -1, Gravity.RIGHT or Gravity.TOP).apply {
+            rightMargin = dp(16)
+        })
+        content.addView(sizeLabel, FrameLayout.LayoutParams(dp(17), dp(20), Gravity.RIGHT or Gravity.BOTTOM))
+        drag.setPadding(0, 0, 0, 0)
+        sizeLabel.setPadding(0, 0, 0, 0)
 
         params = WindowManager.LayoutParams(
             dp(widthDp), dp(heightDp),
@@ -308,7 +316,7 @@ class SubtitleOverlayService : Service() {
         val pinch = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 fontSize = (fontSize * detector.scaleFactor).coerceIn(8f, 40f)
-                adaptLayout()
+                resizeWindow(widthDp, heightDp)
                 return true
             }
         })
@@ -323,11 +331,13 @@ class SubtitleOverlayService : Service() {
     }
 
     private fun adaptLayout() {
-        val showAlpha = heightDp >= 200 && widthDp >= 220
+        val showToolbar = heightDp >= minHeightDp() * 3 + 24
+        toolbarControls?.visibility = if (showToolbar) View.VISIBLE else View.GONE
+        val showAlpha = showToolbar && heightDp >= 200 && widthDp >= 220
         alphaControls?.visibility = if (showAlpha) View.VISIBLE else View.GONE
-        val bodyHeight = (heightDp - 44 - if (showAlpha) 31 else 0).coerceAtLeast(1)
+        val bodyHeight = (heightDp - 2 - (if (showToolbar) 24 else 0) - (if (showAlpha) 31 else 0)).coerceAtLeast(1)
         val fontHeightDp = fontSize * resources.displayMetrics.scaledDensity / density
-        visibleRows = (bodyHeight / (fontHeightDp * 1.25f + 2f)).toInt().coerceIn(1, 5)
+        visibleRows = if (heightDp <= minHeightDp() + 2) 1 else (bodyHeight / (fontHeightDp * 1.35f + 2f)).toInt().coerceIn(1, 5)
         val fitFont = ((bodyHeight.toFloat() / visibleRows - 2f) / 1.25f *
             density / resources.displayMetrics.scaledDensity).coerceAtLeast(8f)
         labels.forEachIndexed { index, view ->
