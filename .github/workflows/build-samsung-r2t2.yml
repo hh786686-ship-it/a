@@ -1,0 +1,121 @@
+name: Build Samsung A16 Confucius4-R2T2 APK
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - build-r2t2-samsung-a16-20261124
+    paths:
+      - 'samsung-r2t2/**'
+      - '.github/workflows/build-samsung-r2t2.yml'
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Reclaim runner disk for large offline model
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          df -h
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Check Flutter
+        run: flutter --version
+      - name: Create Android scaffold
+        working-directory: samsung-r2t2
+        run: |
+          flutter create --platforms=android --project-name=r2t2_live_chinese --org=org.livechinese .
+          cp android_overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          cp android_overrides/MainActivity.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/MainActivity.kt
+          cp android_overrides/SubtitleOverlayService.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/SubtitleOverlayService.kt
+          rm -f test/widget_test.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle.kts")
+          text = p.read_text()
+          assert "android {" in text
+          p.write_text(text.replace("android {", 'android {\n    androidResources { noCompress += "gguf" }', 1))
+          PY
+          printf '\norg.gradle.vfs.watch=false\norg.gradle.parallel=false\n' >> android/gradle.properties
+      - name: Install and verify Android engine
+        working-directory: samsung-r2t2
+        run: python3 scripts/prepare_android_libs.py
+      - name: Dependencies
+        working-directory: samsung-r2t2
+        run: flutter pub get
+      - name: Unit tests
+        working-directory: samsung-r2t2
+        run: flutter test
+      - name: Build installable ARM64 APK
+        working-directory: samsung-r2t2
+        run: |
+          df -h
+          flutter build apk --release --target-platform android-arm64,android-x64
+          df -h
+      - name: Verify small APK has no bundled model
+        working-directory: samsung-r2t2
+        run: |
+          python3 - <<'PY'
+          import pathlib, zipfile
+          apk = pathlib.Path("build/app/outputs/flutter-apk/app-release.apk")
+          assert apk.stat().st_size < 100 * 1024**2
+          with zipfile.ZipFile(apk) as z:
+              assert not any(n.endswith(".gguf") for n in z.namelist())
+              assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
+          print("Verified small APK:", apk.stat().st_size)
+          PY
+      - name: Verify APK signatures and alignment
+        working-directory: samsung-r2t2
+        run: |
+          set -euo pipefail
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$tools/apksigner" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk
+          "$tools/zipalign" -c -P 16 -v 4 build/app/outputs/flutter-apk/app-release.apk > /tmp/apk-alignment.txt
+          tail -1 /tmp/apk-alignment.txt
+      - name: Reclaim build intermediates before emulator
+        working-directory: samsung-r2t2
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v09.apk
+          rm -rf build android/app/src/main/assets/offline-model android/.gradle
+          mkdir -p build/app/outputs/flutter-apk
+          mv /tmp/live-chinese-v09.apk build/app/outputs/flutter-apk/app-release.apk
+          df -h
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install actual release APK on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disk-size: 12G
+          disable-animations: true
+          script: |
+            adb install -r samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
+            adb shell pm path org.livechinese.r2t2_live_chinese | grep 'package:'
+            adb shell am start -W -n org.livechinese.r2t2_live_chinese/.MainActivity
+            sleep 8
+            adb shell pidof org.livechinese.r2t2_live_chinese
+      - name: Publish APK as a GitHub release (no artifact quota)
+        working-directory: samsung-r2t2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create samsung-r2t2-a16-v0.9.0 \
+            build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
+            --target "$GITHUB_SHA" \
+            --title "Live Chinese R2T2 – Samsung A16 v0.9.0" \
+            --notes "Small APK with resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --prerelease
