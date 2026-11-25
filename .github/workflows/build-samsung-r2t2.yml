@@ -14,7 +14,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 100
     steps:
       - name: Reclaim runner disk for large offline model
         run: |
@@ -68,6 +68,15 @@ jobs:
               assert hashlib.file_digest(f, "sha256").hexdigest() == entry["lfs"]["oid"]
           model.with_name("size.txt").write_text(str(entry["size"]))
           print("Verified model size and SHA256:", entry["size"], entry["lfs"]["oid"])
+          with model.open("rb") as f:
+              i = 0
+              while True:
+                  data = f.read(64 * 1024 * 1024)
+                  if not data:
+                      break
+                  model.with_name(f"part-{i:04d}.gguf").write_bytes(data)
+                  i += 1
+          model.unlink()
           PY
       - name: Dependencies
         working-directory: samsung-r2t2
@@ -79,31 +88,70 @@ jobs:
         working-directory: samsung-r2t2
         run: |
           df -h
-          flutter build apk --release --target-platform android-arm64
+          flutter build apk --release --target-platform android-arm64,android-x64
           df -h
       - name: Verify model is included in APK
         working-directory: samsung-r2t2
         run: |
           python3 - <<'PY'
           import pathlib, zipfile, hashlib
-          model = pathlib.Path("android/app/src/main/assets/offline-model/confucius4-r2t2-q4_k.gguf")
           apk = pathlib.Path("build/app/outputs/flutter-apk/app-release.apk")
           with zipfile.ZipFile(apk) as z:
-              name = "assets/offline-model/" + model.name
-              assert z.getinfo(name).file_size == model.stat().st_size
-              with z.open(name) as f:
-                  assert hashlib.file_digest(f, "sha256").hexdigest() == "a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3"
+              names = sorted(n for n in z.namelist() if n.startswith("assets/offline-model/part-") and n.endswith(".gguf"))
+              assert names
+              assert sum(z.getinfo(n).file_size for n in names) == 1490915264
+              h = hashlib.sha256()
+              for name in names:
+                  with z.open(name) as f:
+                      for block in iter(lambda: f.read(1024 * 1024), b""):
+                          h.update(block)
+              assert h.hexdigest() == "a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3"
           assert apk.stat().st_size < 2 * 1024**3, "APK exceeds GitHub release asset limit"
           print("Verified bundled APK:", apk.stat().st_size)
           PY
+      - name: Verify APK signatures and alignment
+        working-directory: samsung-r2t2
+        run: |
+          set -euo pipefail
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$tools/apksigner" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk
+          "$tools/zipalign" -c -P 16 -v 4 build/app/outputs/flutter-apk/app-release.apk > /tmp/apk-alignment.txt
+          tail -1 /tmp/apk-alignment.txt
+      - name: Reclaim build intermediates before emulator
+        working-directory: samsung-r2t2
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v08.apk
+          rm -rf build android/app/src/main/assets/offline-model android/.gradle
+          mkdir -p build/app/outputs/flutter-apk
+          mv /tmp/live-chinese-v08.apk build/app/outputs/flutter-apk/app-release.apk
+          df -h
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install actual release APK on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disk-size: 12G
+          disable-animations: true
+          script: |
+            adb install -r samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
+            adb shell pm path org.livechinese.r2t2_live_chinese | grep 'package:'
+            adb shell am start -W -n org.livechinese.r2t2_live_chinese/.MainActivity
+            sleep 8
+            adb shell pidof org.livechinese.r2t2_live_chinese
       - name: Publish APK as a GitHub release (no artifact quota)
         working-directory: samsung-r2t2
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.7.0 \
+          gh release create samsung-r2t2-a16-v0.8.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.7.0" \
-            --notes "Experimental ARM64 Mandarin overlay with font-dependent one-line minimum height and inline move and resize handles. Requires a separate phone on speaker. Includes the offline model in the APK; no network download on phone. Not device-tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.8.0" \
+            --notes "Experimental ARM64 Mandarin recognition, chunked offline model, Android 15 emulator installation tested, overlay with font-dependent one-line minimum height and inline move and resize handles. Requires a separate phone on speaker. Includes the offline model in the APK; no network download on phone. Samsung A16 physical device not tested." \
             --prerelease

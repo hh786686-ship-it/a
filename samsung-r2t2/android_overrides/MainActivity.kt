@@ -35,11 +35,24 @@ class MainActivity : FlutterActivity() {
                                         if (partial.exists()) partial.delete()
                                         if (target.parentFile!!.usableSpace < expected + 32L * 1024 * 1024)
                                             throw java.io.IOException("Not enough free storage to unpack offline model")
-                                        assets.open("offline-model/confucius4-r2t2-q4_k.gguf").use { input ->
-                                            partial.outputStream().buffered(1024 * 1024).use { output ->
-                                                input.copyTo(output, 1024 * 1024)
+                                        val chunks = assets.list("offline-model")!!.filter { it.endsWith(".gguf") }.sorted()
+                                        check(chunks.isNotEmpty()) { "No bundled model chunks" }
+                                        val digest = java.security.MessageDigest.getInstance("SHA-256")
+                                        partial.outputStream().buffered(1024 * 1024).use { output ->
+                                            val buffer = ByteArray(1024 * 1024)
+                                            for (chunk in chunks) {
+                                                assets.open("offline-model/" + chunk).use { input ->
+                                                    while (true) {
+                                                        val n = input.read(buffer)
+                                                        if (n < 0) break
+                                                        output.write(buffer, 0, n)
+                                                        digest.update(buffer, 0, n)
+                                                    }
+                                                }
                                             }
                                         }
+                                        val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
+                                        check(actual == "a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3") { "Bundled model checksum mismatch" }
                                         if (partial.length() != expected) throw java.io.IOException("Incomplete model extraction")
                                         if (target.exists() && !target.delete()) throw java.io.IOException("Cannot replace old model")
                                         if (!partial.renameTo(target)) throw java.io.IOException("Cannot install model")
