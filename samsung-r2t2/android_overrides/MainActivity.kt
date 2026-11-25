@@ -19,51 +19,11 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "prepareBundledModel" -> {
+                    "availableStorage" -> {
                         val path = call.argument<String>("path")
-                        if (path == null) {
-                            result.error("MODEL", "Missing model path", null)
-                        } else {
-                            Thread {
-                                try {
-                                    val target = java.io.File(path)
-                                    val expected = assets.open("offline-model/size.txt").bufferedReader().use { it.readText().trim().toLong() }
-                                    val marker = java.io.File(path + ".bundled")
-                                    if (!target.isFile || target.length() != expected || !marker.isFile) {
-                                        target.parentFile?.mkdirs()
-                                        val partial = java.io.File(path + ".extracting")
-                                        if (partial.exists()) partial.delete()
-                                        if (target.parentFile!!.usableSpace < expected + 32L * 1024 * 1024)
-                                            throw java.io.IOException("Not enough free storage to unpack offline model")
-                                        val chunks = assets.list("offline-model")!!.filter { it.endsWith(".gguf") }.sorted()
-                                        check(chunks.isNotEmpty()) { "No bundled model chunks" }
-                                        val digest = java.security.MessageDigest.getInstance("SHA-256")
-                                        partial.outputStream().buffered(1024 * 1024).use { output ->
-                                            val buffer = ByteArray(1024 * 1024)
-                                            for (chunk in chunks) {
-                                                assets.open("offline-model/" + chunk).use { input ->
-                                                    while (true) {
-                                                        val n = input.read(buffer)
-                                                        if (n < 0) break
-                                                        output.write(buffer, 0, n)
-                                                        digest.update(buffer, 0, n)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
-                                        check(actual == "a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3") { "Bundled model checksum mismatch" }
-                                        if (partial.length() != expected) throw java.io.IOException("Incomplete model extraction")
-                                        if (target.exists() && !target.delete()) throw java.io.IOException("Cannot replace old model")
-                                        if (!partial.renameTo(target)) throw java.io.IOException("Cannot install model")
-                                        marker.writeText(expected.toString())
-                                    }
-                                    runOnUiThread { result.success(null) }
-                                } catch (e: Exception) {
-                                    runOnUiThread { result.error("MODEL", e.message, null) }
-                                }
-                            }.start()
-                        }
+                        if (path == null) result.error("STORAGE", "Missing path", null)
+                        else try { result.success(android.os.StatFs(path).availableBytes) }
+                        catch (e: Exception) { result.error("STORAGE", e.message, null) }
                     }
                     "hasOverlayPermission" -> result.success(Settings.canDrawOverlays(this))
                     "requestOverlayPermission" -> {

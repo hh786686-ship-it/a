@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
 
 import 'package:crispasr/crispasr.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,8 @@ import 'package:record/record.dart';
 const modelUrl =
     'https://huggingface.co/cstr/confucius4-r2t2-GGUF/resolve/main/confucius4-r2t2-q4_k.gguf?download=true';
 const modelFile = 'confucius4-r2t2-q4_k.gguf';
+const modelBytes = 1490915264;
+const modelHash = 'a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3';
 
 void main() => runApp(const MaterialApp(
   home: LiveCaptions(), debugShowCheckedModeBanner: false,
@@ -161,13 +164,18 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   Isolate? _worker;
   SendPort? _send;
   final _captions = CaptionLedger();
-  String _status = 'Offline model included. Tap Load model.';
+  String _status = 'Download the model once. Interrupted downloads resume automatically.';
   bool _loaded = false, _listening = false, _downloading = false, _busy = false;
   int _run = 0, _font = 23;
   double _progress = 0;
+  HttpClient? _downloadClient;
+  bool _pauseDownload = false;
+  bool _modelVerified = false;
+  bool _loadingModel = false;
 
   @override
   void dispose() {
+    _downloadClient?.close(force: true);
     _micSub?.cancel();
     _recorder.stop();
     _recorder.dispose();
@@ -229,27 +237,121 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     return File('${models.path}/$modelFile');
   }
 
+  Future<bool> _verifyModel(File file) async {
+    if (!await file.exists() || await file.length() != modelBytes) return false;
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString() == modelHash;
+  }
+
   Future<void> _download() async {
-    if (_downloading) return;
-    setState(() { _downloading = true; _status = 'Preparing included offline model…'; });
+    if (_downloading || _loaded || _loadingModel) return;
+    _pauseDownload = false;
+    setState(() { _downloading = true; _status = 'Checking model and free space…'; });
     try {
       final file = await _modelPath();
-      await _overlay.invokeMethod<void>('prepareBundledModel', {'path': file.path});
-      if (mounted) setState(() => _status = 'Offline model ready.');
+      if (_modelVerified || await _verifyModel(file)) {
+        _modelVerified = true;
+        if (mounted) setState(() { _progress = 1; _status = 'Verified model ready. Tap Load model.'; });
+        return;
+      }
+      // Keep just one file. A partial download is renamed in place after verification.
+      if (await file.exists()) await file.delete();
+      final partial = File('${file.path}.part');
+      if (await partial.exists() && await partial.length() > modelBytes) await partial.delete();
+      for (var attempt = 0; attempt < 5 && !_pauseDownload; attempt++) {
+        final offset = await partial.exists() ? await partial.length() : 0;
+        if (offset == modelBytes) break;
+        final free = await _overlay.invokeMethod<int>('availableStorage', {'path': file.parent.path});
+        if (free != null && free < modelBytes - offset + 64 * 1024 * 1024) {
+          throw StateError('Not enough internal storage for remaining model bytes.');
+        }
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 25)..autoUncompress = false;
+        _downloadClient = client;
+        RandomAccessFile? output;
+        try {
+          final request = await client.getUrl(Uri.parse(modelUrl)).timeout(const Duration(seconds: 30));
+          request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+          request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-');
+          final response = await request.close().timeout(const Duration(seconds: 45));
+          final range = response.headers.value(HttpHeaders.contentRangeHeader);
+          if (response.statusCode == 206) {
+            final match = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$').firstMatch(range ?? '');
+            if (match == null || int.parse(match.group(1)!) != offset ||
+                int.parse(match.group(3)!) != modelBytes) {
+              throw StateError('Server returned an incorrect byte range.');
+            }
+          } else if (response.statusCode != 200 || offset != 0) {
+            throw StateError('Cannot safely resume: HTTP ${response.statusCode}. Partial download kept.');
+          }
+          output = await partial.open(mode: FileMode.append);
+          var received = offset;
+          var lastUpdate = DateTime.now().subtract(const Duration(seconds: 1));
+          await for (final bytes in response.timeout(const Duration(seconds: 35))) {
+            if (_pauseDownload) break;
+            if (received + bytes.length > modelBytes) throw StateError('Unexpected model length.');
+            await output.writeFrom(bytes);
+            received += bytes.length;
+            final now = DateTime.now();
+            if (mounted && now.difference(lastUpdate).inMilliseconds >= 500) {
+              lastUpdate = now;
+              setState(() { _progress = received / modelBytes;
+                _status = 'Downloading: ${(received / 1000000).toStringAsFixed(0)} / 1491 MB'; });
+            }
+          }
+          await output.flush();
+        } catch (e) {
+          if (_pauseDownload) break;
+          if (attempt == 4) rethrow;
+        } finally {
+          await output?.close();
+          client.close(force: true);
+          _downloadClient = null;
+        }
+        if (!_pauseDownload && await partial.exists() && await partial.length() < modelBytes) {
+          if (mounted) setState(() => _status = 'Connection interrupted. Resuming automatically…');
+          await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
+        }
+      }
+      if (_pauseDownload) {
+        if (mounted) setState(() => _status = 'Paused. Tap Download / resume to continue.');
+        return;
+      }
+      if (!await partial.exists() || await partial.length() != modelBytes) {
+        throw StateError('Download incomplete. Tap Download / resume.');
+      }
+      if (mounted) setState(() { _progress = 1; _status = 'Verifying SHA-256 checksum…'; });
+      if (!await _verifyModel(partial)) {
+        await partial.delete();
+        throw StateError('Model checksum mismatch. Download again.');
+      }
+      await partial.rename(file.path);
+      _modelVerified = true;
+      if (mounted) setState(() => _status = 'Verified model ready. Tap Load model.');
     } catch (e) {
-      if (mounted) setState(() => _status = 'Model preparation error: $e');
+      if (mounted) setState(() => _status = _pauseDownload ? 'Paused. Tap Download / resume.' : 'Download error: $e');
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
   }
 
+  void _pause() {
+    _pauseDownload = true;
+    _downloadClient?.close(force: true);
+  }
+
   Future<void> _load() async {
     if (_loaded || _updates != null || _downloading) return;
-    await _download();
-    if (!mounted || _status.startsWith('Model preparation error:')) return;
+    if (_loadingModel) return;
+    _loadingModel = true;
     final model = await _modelPath();
-    if (!await model.exists() || await model.length() < 500 * 1024 * 1024) {
-      setState(() => _status = 'Included model could not be prepared. Check available storage.');
+    if (mounted) setState(() => _status = 'Checking installed model…');
+    try {
+      _modelVerified = _modelVerified || await _verifyModel(model);
+    } catch (_) { _modelVerified = false; }
+    _loadingModel = false;
+    if (!mounted) return;
+    if (!_modelVerified) {
+      setState(() => _status = 'Tap Download / resume to obtain the verified model first.');
       return;
     }
     setState(() => _status = 'Loading model into phone memory…');
@@ -271,6 +373,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
               setState(() => _status = 'Listening to phone speaker…');
               break;
             case 'error':
+              if (!_loaded) { _updates?.close(); _updates = null; _worker?.kill(); _worker = null; _send = null; }
               setState(() => _status = 'Recognition error: ${message['message']}');
               break;
             case 'caption':
@@ -370,8 +473,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           value: _progress == 0 ? null : _progress),
         const SizedBox(height: 8),
         Wrap(alignment: WrapAlignment.center, spacing: 10, children: [
-          ElevatedButton(onPressed: _downloading ? null : _download,
-            child: const Text('1. Prepare included model')),
+          ElevatedButton(onPressed: (_loaded || _loadingModel) ? null : (_downloading ? _pause : _download),
+            child: Text(_downloading ? 'Pause download' : '1. Download / resume')),
           ElevatedButton(onPressed: (_loaded || _downloading) ? null : _load,
             child: const Text('2. Load model')),
           ElevatedButton(onPressed: _toggleMic,
