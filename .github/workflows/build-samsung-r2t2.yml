@@ -14,8 +14,15 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
     steps:
+      - name: Reclaim runner disk for large offline model
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          df -h
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
@@ -31,6 +38,14 @@ jobs:
           cp android_overrides/MainActivity.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/MainActivity.kt
           cp android_overrides/SubtitleOverlayService.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/SubtitleOverlayService.kt
           rm -f test/widget_test.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle.kts")
+          text = p.read_text()
+          assert "android {" in text
+          p.write_text(text.replace("android {", 'android {\n    androidResources { noCompress += "gguf" }', 1))
+          PY
+          printf '\norg.gradle.vfs.watch=false\norg.gradle.parallel=false\n' >> android/gradle.properties
       - name: Install and verify Android engine
         working-directory: samsung-r2t2
         run: python3 scripts/prepare_android_libs.py
@@ -62,19 +77,22 @@ jobs:
         run: flutter test
       - name: Build installable ARM64 APK
         working-directory: samsung-r2t2
-        run: flutter build apk --release --target-platform android-arm64
+        run: |
+          df -h
+          flutter build apk --release --target-platform android-arm64
+          df -h
       - name: Verify model is included in APK
         working-directory: samsung-r2t2
         run: |
           python3 - <<'PY'
-          import pathlib, zipfile
+          import pathlib, zipfile, hashlib
           model = pathlib.Path("android/app/src/main/assets/offline-model/confucius4-r2t2-q4_k.gguf")
           apk = pathlib.Path("build/app/outputs/flutter-apk/app-release.apk")
           with zipfile.ZipFile(apk) as z:
               name = "assets/offline-model/" + model.name
               assert z.getinfo(name).file_size == model.stat().st_size
               with z.open(name) as f:
-                  assert f.read(4) == b"GGUF"
+                  assert hashlib.file_digest(f, "sha256").hexdigest() == "a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3"
           assert apk.stat().st_size < 2 * 1024**3, "APK exceeds GitHub release asset limit"
           print("Verified bundled APK:", apk.stat().st_size)
           PY
