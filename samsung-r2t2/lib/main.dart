@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:crispasr/crispasr.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -163,7 +161,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   Isolate? _worker;
   SendPort? _send;
   final _captions = CaptionLedger();
-  String _status = 'Download the model once to enable offline recognition.';
+  String _status = 'Offline model included. Tap Load model.';
   bool _loaded = false, _listening = false, _downloading = false, _busy = false;
   int _run = 0, _font = 23;
   double _progress = 0;
@@ -233,68 +231,25 @@ class _LiveCaptionsState extends State<LiveCaptions> {
 
   Future<void> _download() async {
     if (_downloading) return;
-    setState(() { _downloading = true; _status = 'Downloading the model over Wi-Fi…'; });
+    setState(() { _downloading = true; _status = 'Preparing included offline model…'; });
     try {
       final file = await _modelPath();
-      if (await file.exists() && await file.length() > 500 * 1024 * 1024) {
-        if (mounted) setState(() => _status = 'Model already downloaded.');
-        return;
-      }
-      final partial = File('${file.path}.part');
-      var existing = await partial.exists() ? await partial.length() : 0;
-      final client = http.Client();
-      try {
-        final request = http.Request('GET', Uri.parse(modelUrl));
-        if (existing > 0) request.headers['Range'] = 'bytes=$existing-';
-        final response = await client.send(request);
-        if (response.statusCode != 200 && response.statusCode != 206) {
-          throw StateError('Download HTTP ${response.statusCode}');
-        }
-        // Servers are allowed to ignore Range. Never append a complete response.
-        if (existing > 0 && response.statusCode != 206) {
-          await partial.delete();
-          existing = 0;
-        }
-        final expected = response.contentLength == null
-            ? null : existing + response.contentLength!;
-        final sink = partial.openWrite(mode: existing > 0 ? FileMode.append : FileMode.write);
-        var received = existing;
-        try {
-          await for (final bytes in response.stream) {
-            sink.add(bytes);
-            received += bytes.length;
-            if (mounted) setState(() {
-              _progress = expected == null ? 0 : math.min(1, received / expected);
-              _status = 'Model: ${(received / 1048576).toStringAsFixed(0)} MB';
-            });
-          }
-        } finally {
-          await sink.close();
-        }
-        if (expected != null && received != expected) {
-          throw StateError('Incomplete download. Try again to resume.');
-        }
-        if (received < 500 * 1024 * 1024) {
-          throw StateError('Model file too small. Try again.');
-        }
-        if (await file.exists()) await file.delete();
-        await partial.rename(file.path);
-        if (mounted) setState(() => _status = 'Model downloaded. Ready for offline use.');
-      } finally {
-        client.close();
-      }
+      await _overlay.invokeMethod<void>('prepareBundledModel', {'path': file.path});
+      if (mounted) setState(() => _status = 'Offline model ready.');
     } catch (e) {
-      if (mounted) setState(() => _status = 'Download error: $e');
+      if (mounted) setState(() => _status = 'Model preparation error: $e');
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
   }
 
   Future<void> _load() async {
-    if (_loaded || _updates != null) return;
+    if (_loaded || _updates != null || _downloading) return;
+    await _download();
+    if (!mounted || _status.startsWith('Model preparation error:')) return;
     final model = await _modelPath();
     if (!await model.exists() || await model.length() < 500 * 1024 * 1024) {
-      setState(() => _status = 'Download the Q4 model first.');
+      setState(() => _status = 'Included model could not be prepared. Check available storage.');
       return;
     }
     setState(() => _status = 'Loading model into phone memory…');
@@ -416,8 +371,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         const SizedBox(height: 8),
         Wrap(alignment: WrapAlignment.center, spacing: 10, children: [
           ElevatedButton(onPressed: _downloading ? null : _download,
-            child: const Text('1. Download model')),
-          ElevatedButton(onPressed: _loaded ? null : _load,
+            child: const Text('1. Prepare included model')),
+          ElevatedButton(onPressed: (_loaded || _downloading) ? null : _load,
             child: const Text('2. Load model')),
           ElevatedButton(onPressed: _toggleMic,
             child: Text(_listening ? 'Stop listening' : '3. Start listening')),
