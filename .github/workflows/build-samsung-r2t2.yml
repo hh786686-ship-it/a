@@ -48,9 +48,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.4.0 \
+          gh release create samsung-r2t2-a16-v0.5.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.4.0" \
-            --notes "Experimental ARM64 Mandarin overlay with drag-to-resize width and height, opacity slider, and saved position and sizing. Requires a separate phone on speaker. Downloads model after installation. Not device-tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.5.0" \
+            --notes "Experimental ARM64 Mandarin overlay with compact 100 x 64 dp minimum, independent corner resizing, pinch font sizing, adaptive visible lines, opacity and saved settings. Requires a separate phone on speaker. Downloads model after installation. Not device-tested." \
             --prerelease

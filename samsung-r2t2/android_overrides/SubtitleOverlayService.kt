@@ -15,6 +15,8 @@ import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import android.text.TextUtils
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
@@ -40,6 +42,9 @@ class SubtitleOverlayService : Service() {
     private var bubble: LinearLayout? = null
     private var params: WindowManager.LayoutParams? = null
     private var captionsBox: LinearLayout? = null
+    private var alphaControls: LinearLayout? = null
+    private var lastLines: List<String> = emptyList()
+    private var visibleRows = 5
     private var labels: List<TextView> = emptyList()
     private var fontSize = 23f
     private var overlayOpacity = 0.82f
@@ -54,10 +59,10 @@ class SubtitleOverlayService : Service() {
         super.onCreate()
         instance = this
         manager = getSystemService(WINDOW_SERVICE) as WindowManager
-        fontSize = preferences.getFloat("font", 23f).coerceIn(14f, 40f)
+        fontSize = preferences.getFloat("font", 23f).coerceIn(8f, 40f)
         overlayOpacity = preferences.getFloat("opacity", 0.82f).coerceIn(0.15f, 1f)
-        widthDp = preferences.getInt("width", 340).coerceIn(220, 1200)
-        heightDp = preferences.getInt("height", 345).coerceIn(250, 1400)
+        widthDp = preferences.getInt("width", 340).coerceIn(100, 1200)
+        heightDp = preferences.getInt("height", 345).coerceIn(64, 1400)
         leftPx = preferences.getInt("x", -1)
         topPx = preferences.getInt("y", -1)
 
@@ -112,67 +117,69 @@ class SubtitleOverlayService : Service() {
             text = label
             setTextColor(Color.WHITE)
             textSize = size
-            setPadding(dp(5), dp(2), dp(5), dp(2))
+            setPadding(dp(2), 0, dp(2), 0)
             gravity = Gravity.CENTER_VERTICAL
         }
 
     private fun maxWidthDp(): Int = (resources.displayMetrics.widthPixels / density).toInt()
-        .coerceAtLeast(220)
+        .coerceAtLeast(100)
     private fun maxHeightDp(): Int = (resources.displayMetrics.heightPixels / density).toInt()
-        .coerceAtLeast(250)
+        .coerceAtLeast(64)
 
     private fun resizeWindow(newWidthDp: Int, newHeightDp: Int) {
         val p = params ?: return
         val view = bubble ?: return
-        widthDp = newWidthDp.coerceIn(220, maxWidthDp())
-        heightDp = newHeightDp.coerceIn(250, maxHeightDp())
+        widthDp = newWidthDp.coerceIn(100, maxWidthDp())
+        heightDp = newHeightDp.coerceIn(64, maxHeightDp())
         p.width = dp(widthDp)
         p.height = dp(heightDp)
+        p.x = p.x.coerceIn(0, (resources.displayMetrics.widthPixels - p.width).coerceAtLeast(0))
+        p.y = p.y.coerceIn(0, (resources.displayMetrics.heightPixels - p.height).coerceAtLeast(0))
+        adaptLayout()
         manager.updateViewLayout(view, p)
     }
 
     private fun showOverlay() {
-        widthDp = widthDp.coerceIn(220, maxWidthDp())
-        heightDp = heightDp.coerceIn(250, maxHeightDp())
+        widthDp = widthDp.coerceIn(100, maxWidthDp())
+        heightDp = heightDp.coerceIn(64, maxHeightDp())
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb((overlayOpacity * 255).roundToInt(), 13, 19, 31))
+            setBackgroundColor(Color.argb((overlayOpacity * 255).roundToInt(), 70, 70, 70))
             setPadding(dp(5), dp(2), dp(5), dp(2))
         }
         val toolbar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val drag = text("☰ Move", 14f).apply {
+        val drag = text("⠿", 16f).apply {
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.CYAN)
         }
-        toolbar.addView(drag, LinearLayout.LayoutParams(0, dp(38), 1f))
+        drag.gravity = Gravity.CENTER
+        drag.contentDescription = "Move overlay"
 
         fun action(title: String, block: () -> Unit) {
             val v = text(title, 17f).apply {
                 gravity = Gravity.CENTER
                 setOnClickListener { block() }
             }
-            toolbar.addView(v, LinearLayout.LayoutParams(dp(31), dp(38)))
+            v.setPadding(0, 0, 0, 0)
+            toolbar.addView(v, LinearLayout.LayoutParams(0, dp(24), 1f))
         }
         action("−") {
-            fontSize = (fontSize - 2f).coerceAtLeast(14f)
-            labels.forEach { it.textSize = fontSize }
+            fontSize = (fontSize - 2f).coerceAtLeast(8f)
+            adaptLayout()
             saveSettings()
         }
         action("+") {
             fontSize = (fontSize + 2f).coerceAtMost(40f)
-            labels.forEach { it.textSize = fontSize }
+            adaptLayout()
             saveSettings()
         }
-        action("↔") {
-            resizeWindow(if (widthDp >= maxWidthDp() - 20) 260 else widthDp + 35, heightDp)
-            saveSettings()
-        }
-        action("↕") {
-            resizeWindow(widthDp, if (heightDp >= maxHeightDp() - 40) 280 else heightDp + 45)
+        action("◐") {
+            overlayOpacity = if (overlayOpacity > 0.5f) 0.28f else 0.82f
+            root.setBackgroundColor(Color.argb((overlayOpacity * 255).roundToInt(), 70, 70, 70))
             saveSettings()
         }
 
@@ -189,7 +196,7 @@ class SubtitleOverlayService : Service() {
                     if (!fromUser) return
                     overlayOpacity = (0.15f + value / 100f).coerceIn(0.15f, 1f)
                     root.setBackgroundColor(Color.argb(
-                        (overlayOpacity * 255).roundToInt(), 13, 19, 31))
+                        (overlayOpacity * 255).roundToInt(), 70, 70, 70))
                 }
                 override fun onStartTrackingTouch(bar: SeekBar?) {}
                 override fun onStopTrackingTouch(bar: SeekBar?) { saveSettings() }
@@ -198,14 +205,18 @@ class SubtitleOverlayService : Service() {
         alphaRow.addView(alpha, LinearLayout.LayoutParams(0, dp(31), 1f))
 
         action("×") { stopSelf() }
-        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(38)))
-        root.addView(alphaRow, LinearLayout.LayoutParams(-1, dp(35)))
+        toolbar.addView(drag, LinearLayout.LayoutParams(0, dp(24), 1f))
+        root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(24)))
+        root.addView(alphaRow, LinearLayout.LayoutParams(-1, dp(31)))
+        alphaControls = alphaRow
 
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         captionsBox = body
         labels = (0 until 5).map {
             text("", fontSize).also { view ->
                 view.maxLines = 1
+                view.includeFontPadding = false
+                view.ellipsize = TextUtils.TruncateAt.START
                 view.setTextIsSelectable(false)
                 body.addView(view, LinearLayout.LayoutParams(-1, 0, 1f))
             }
@@ -216,12 +227,14 @@ class SubtitleOverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        val sizeLabel = text("Drag corner to resize  ⇲", 12f).apply {
+        val sizeLabel = text("⇲", 16f).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             setTextColor(Color.CYAN)
         }
-        resizeRow.addView(sizeLabel, LinearLayout.LayoutParams(-2, dp(34)))
-        root.addView(resizeRow, LinearLayout.LayoutParams(-1, dp(34)))
+        sizeLabel.contentDescription = "Drag corner to resize width and height"
+        sizeLabel.setPadding(0, 0, dp(2), 0)
+        resizeRow.addView(sizeLabel, LinearLayout.LayoutParams(dp(40), dp(20)))
+        root.addView(resizeRow, LinearLayout.LayoutParams(-1, dp(20)))
 
         params = WindowManager.LayoutParams(
             dp(widthDp), dp(heightDp),
@@ -292,14 +305,50 @@ class SubtitleOverlayService : Service() {
             }
         }
 
+        val pinch = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                fontSize = (fontSize * detector.scaleFactor).coerceIn(8f, 40f)
+                adaptLayout()
+                return true
+            }
+        })
+        body.setOnTouchListener { _, event ->
+            pinch.onTouchEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) saveSettings()
+            true
+        }
         bubble = root
+        adaptLayout()
         manager.addView(root, params)
+    }
+
+    private fun adaptLayout() {
+        val showAlpha = heightDp >= 200 && widthDp >= 220
+        alphaControls?.visibility = if (showAlpha) View.VISIBLE else View.GONE
+        val bodyHeight = (heightDp - 44 - if (showAlpha) 31 else 0).coerceAtLeast(1)
+        val fontHeightDp = fontSize * resources.displayMetrics.scaledDensity / density
+        visibleRows = (bodyHeight / (fontHeightDp * 1.25f + 2f)).toInt().coerceIn(1, 5)
+        val fitFont = ((bodyHeight.toFloat() / visibleRows - 2f) / 1.25f *
+            density / resources.displayMetrics.scaledDensity).coerceAtLeast(8f)
+        labels.forEachIndexed { index, view ->
+            view.visibility = if (index < visibleRows) View.VISIBLE else View.GONE
+            view.textSize = fontSize.coerceAtMost(fitFont)
+        }
+        renderLines()
+    }
+
+    private fun renderLines() {
+        val recent = lastLines.takeLast(visibleRows)
+        labels.forEachIndexed { index, view ->
+            view.text = recent.getOrNull(index) ?: ""
+        }
     }
 
     fun setLines(lines: List<String>) {
         val five = lines.takeLast(5)
         android.os.Handler(mainLooper).post {
-            labels.forEachIndexed { index, view -> view.text = five.getOrNull(index) ?: "" }
+            lastLines = five
+            renderLines()
         }
     }
 
