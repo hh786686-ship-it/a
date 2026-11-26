@@ -69,7 +69,7 @@ jobs:
           test -f /tmp/vulkan-headers/include/spirv/unified1/spirv.hpp
           cmake -S /tmp/crispasr-vulkan -B /tmp/crispasr-vulkan/build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DCMAKE_CXX_MODULE_STD=OFF -DCMAKE_CXX_COMPILER_IMPORT_STD= \
             -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_EXAMPLES=OFF -DCRISPASR_BUILD_SERVER=OFF \
             -DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/tmp/vulkan-headers/include -DCMAKE_CXX_FLAGS=-I/tmp/vulkan-headers/include -DCMAKE_C_FLAGS=-I/tmp/vulkan-headers/include -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
