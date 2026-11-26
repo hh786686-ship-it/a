@@ -37,9 +37,11 @@ void recognitionWorker(SendPort parent) async {
       closeStream();
       try {
         session?.close();
+        final layers = message['layers'] as int? ?? 0;
+        if (layers > 0) setGpuBackend('vulkan');
         session = CrispasrSession.openWithParams(
           message['path'] as String,
-          backend: 'qwen3', useGpu: message['gpu'] != false, nThreads: 4, nGpuLayers: message['gpu'] == false ? 0 : 99,
+          backend: 'qwen3', useGpu: layers > 0, nThreads: 4, nGpuLayers: layers, flashAttn: false, verbosity: 1,
         );
         final kind = session!.streamingKind;
         if (kind == 0) throw StateError('Android library has no streaming support.');
@@ -179,7 +181,13 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
-  bool _gpu = true;
+  int _gpuLayers = 4;
+  File? _loadMarker;
+  bool _checkingRecovery = true;
+
+  Future<void> _clearLoadMarker() async {
+    try { final marker = _loadMarker; if (marker != null && await marker.exists()) await marker.delete(); } catch (_) {}
+  }
   bool _transferring = false;
   int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0, _skippedBytes = 0;
   double _micLevel = 0;
@@ -199,7 +207,14 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final file = await _modelPath();
-      // Experimental GPU mode must be explicitly loaded so CPU remains selectable.
+      _loadMarker = File('${file.parent.path}/gpu-load-in-progress');
+      final interrupted = await _loadMarker!.exists();
+      if (!mounted) return;
+      setState(() {
+        _checkingRecovery = false;
+        if (interrupted) { _gpuLayers = 0; _status = 'Previous GPU load interrupted. CPU selected for safe recovery.'; }
+      });
+      await _clearLoadMarker();
     });
   }
 
@@ -413,7 +428,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   }
 
   Future<void> _load() async {
-    if (_loaded || _updates != null || _downloading) return;
+    if (_loaded || _updates != null || _downloading || _checkingRecovery) return;
     if (_loadingModel || _transferring) return;
     _loadingModel = true;
     final model = await _modelPath();
@@ -421,39 +436,41 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     try {
       _modelVerified = _modelVerified || await _verifyModel(model);
     } catch (_) { _modelVerified = false; }
-    _loadingModel = false;
     if (!mounted) return;
     if (!_modelVerified) {
-      setState(() => _status = 'Tap Download / resume to obtain the verified model first.');
+      setState(() { _loadingModel = false; _status = 'Tap Download / resume to obtain the verified model first.'; });
       return;
     }
     try { await _overlay.invokeMethod('keepModelWarm'); } catch (_) {}
     if (!mounted) return;
-    setState(() => _status = 'Loading model into phone memory…');
-    _updates = ReceivePort();
+    final layers = _gpuLayers;
+    setState(() => _status = 'Loading model ($layers GPU layers)…');
     try {
+      if (layers > 0) await _loadMarker!.writeAsString('$layers', flush: true);
+      _updates = ReceivePort();
       _worker = await Isolate.spawn(recognitionWorker, _updates!.sendPort, onError: _updates!.sendPort, onExit: _updates!.sendPort);
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path, 'gpu': _gpu});
+          _send!.send({'op': 'load', 'path': model.path, 'layers': layers});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
           _updates?.close(); _updates = null; _send = null; _worker = null;
-          setState(() { _loaded = false; _listening = false; _status = 'Recognition worker stopped: ${message ?? "possibly low memory"}'; });
+          setState(() { _loadingModel = false; _gpuLayers = 0; _loaded = false; _listening = false; _status = 'Recognition worker stopped: ${message ?? "possibly low memory"}'; });
         } else if (message is Map && mounted) {
           final run = message['run'];
           if (run is int && run != _run) return;
           switch (message['type']) {
             case 'ready':
-              setState(() { _loaded = true; _status = _gpu ? 'GPU requested. Tap Start listening.' : 'CPU mode ready. Tap Start listening.'; });
+              unawaited(_clearLoadMarker());
+              setState(() { _loadingModel = false; _loaded = true; _status = layers > 0 ? '$layers GPU layers requested. Tap Start listening.' : 'CPU mode ready. Tap Start listening.'; });
               break;
             case 'started':
               setState(() => _status = 'Listening to phone speaker…');
               break;
             case 'error':
-              if (!_loaded) { _updates?.close(); _updates = null; _worker?.kill(); _worker = null; _send = null; }
+              if (!_loaded) { _updates?.close(); _updates = null; _worker?.kill(); _worker = null; _send = null; _loadingModel = false; _gpuLayers = 0; unawaited(_clearLoadMarker()); }
               _inFlight = false;
               setState(() => _status = 'Recognition error: ${message['message']}');
               break;
@@ -477,7 +494,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     } catch (e) {
       _updates?.close();
       _updates = null;
-      if (mounted) setState(() => _status = 'Cannot start model: $e');
+      if (mounted) setState(() { _loadingModel = false; _gpuLayers = 0; _status = 'Cannot start model: $e'; });
     }
   }
 
@@ -579,7 +596,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           ),
         )),
         const SizedBox(height: 15),
-        if (!_loaded && !_loadingModel && _updates == null) SwitchListTile(title: const Text('Experimental Vulkan GPU', style: TextStyle(color: Colors.white)), value: _gpu, onChanged: (v) => setState(() => _gpu = v)),
+        if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery)
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers (recommended test)')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
         if (_listening) ...[
           LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),
@@ -591,7 +609,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         Wrap(alignment: WrapAlignment.center, spacing: 10, children: [
           ElevatedButton(onPressed: (_loaded || _loadingModel) ? null : (_downloading ? _pause : _download),
             child: Text(_downloading ? 'Pause download' : '1. Download / resume')),
-          ElevatedButton(onPressed: (_loaded || _downloading) ? null : _load,
+          ElevatedButton(onPressed: (_loaded || _downloading || _loadingModel || _checkingRecovery) ? null : _load,
             child: const Text('2. Load model')),
           ElevatedButton(onPressed: (_transferring || _downloading || _loaded || _loadingModel) ? null : () => _transferModel(false),
             child: const Text('Import model')),
