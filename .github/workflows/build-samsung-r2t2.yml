@@ -78,11 +78,18 @@ jobs:
               assert not any(n.endswith(".gguf") for n in z.namelist())
               assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
               assert "lib/arm64-v8a/libomp.so" in z.namelist()
-              import re, subprocess, tempfile
-              system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so", "libz.so", "libvulkan.so", "libOpenSLES.so", "libaaudio.so", "libatomic.so", "libEGL.so", "libGLESv2.so", "libjnigraphics.so"}
+              import re, subprocess, tempfile, os, json
+              sdk = pathlib.Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk")
+              ndk = sdk / "ndk" / "27.2.12479018"
+              # NDK public system libraries (not private Android platform libraries).
+              metadata = json.loads((ndk / "meta" / "system_libs.json").read_text())
+              system = {name for name, api in metadata.items() if int(api) <= 35}
+              assert "libmediandk.so" in system
+              assert "libomp.so" not in system
+              print("Public Android system libraries:", sorted(system))
               libs = {n.rsplit("/",1)[1] for n in z.namelist() if n.startswith("lib/arm64-v8a/") and n.endswith(".so")}
               with tempfile.TemporaryDirectory() as tmp:
-                  for name in libs:
+                  for name in sorted(libs):
                       dest = z.extract("lib/arm64-v8a/" + name, tmp)
                       info = subprocess.check_output(["readelf","-d",dest], text=True)
                       deps = set(re.findall(r"Shared library: \[(.*?)\]", info))
