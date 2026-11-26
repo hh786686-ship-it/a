@@ -43,9 +43,7 @@ void recognitionWorker(SendPort parent) async {
           message['path'] as String,
           backend: 'qwen3', useGpu: layers > 0, nThreads: 4, nGpuLayers: layers, flashAttn: false, verbosity: 1,
         );
-        final kind = session!.streamingKind;
-        if (kind == 0) throw StateError('Android library has no streaming support.');
-        parent.send({'type': 'ready', 'kind': kind});
+        parent.send({'type': 'ready', 'kind': 0});
       } catch (e) {
         try { session?.close(); } catch (_) {}
         session = null;
@@ -78,23 +76,12 @@ void recognitionWorker(SendPort parent) async {
         double energy = 0;
         for (final sample in pcm) { energy += sample * sample; }
         if (energy / n >= 0.000004) {
-          // Independent bounded utterances: only a single feed per window,
-          // no growing prefix or repeated processing of previous windows.
-          parent.send({'type': 'phase', 'run': run, 'phase': 'Opening stream'});
-          final segment = session!.openStream(stepMs: 1000, lengthMs: 1000, nThreads: 4, language: 'zh');
-          try {
-            parent.send({'type': 'phase', 'run': run, 'phase': 'Feeding audio / decoding'});
-            final partial = segment.feed(pcm);
-            final partialText = (partial?.text ?? '').trim();
-            if (partialText.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': partialText});
-            parent.send({'type': 'phase', 'run': run, 'phase': 'Finalizing stream'});
-            final finalResult = segment.flush();
-            final text = (finalResult?.text ?? '').trim();
-            if (text.isNotEmpty && text != partialText) {
-              final suffix = text.startsWith(partialText) ? text.substring(partialText.length).trim() : (partialText.isEmpty ? text : '');
-              if (suffix.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': suffix});
-            }
-          } finally { parent.send({'type': 'phase', 'run': run, 'phase': 'Closing stream'}); segment.close(); }
+          // Decode each bounded PCM chunk directly, bypassing native streams.
+          parent.send({'type': 'phase', 'run': run, 'phase': 'Direct transcription'});
+          final segments = session!.transcribe(pcm, language: 'zh');
+          parent.send({'type': 'phase', 'run': run, 'phase': 'Formatting result'});
+          final text = segments.map((s) => s.text.trim()).where((s) => s.isNotEmpty).join('');
+          if (text.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': text});
         }
         parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds});
       } catch (e) {
