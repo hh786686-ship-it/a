@@ -49,7 +49,11 @@ jobs:
       - name: Install and verify Android engine
         working-directory: samsung-r2t2
         run: |
-          sdkmanager "ndk;27.2.12479018"
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk"
+          manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
+          test -x "$manager"
+          "$manager" --sdk_root="$sdk" "ndk;27.2.12479018"
           python3 scripts/prepare_android_libs.py
       - name: Dependencies
         working-directory: samsung-r2t2
