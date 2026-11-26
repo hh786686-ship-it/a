@@ -26,13 +26,9 @@ void recognitionWorker(SendPort parent) async {
   final inbox = ReceivePort();
   parent.send(inbox.sendPort);
   CrispasrSession? session;
-  StreamingSession? stream;
   int activeRun = -1;
 
   void closeStream() {
-    try { stream?.flush(); } catch (_) {}
-    try { stream?.close(); } catch (_) {}
-    stream = null;
     activeRun = -1;
   }
 
@@ -43,7 +39,7 @@ void recognitionWorker(SendPort parent) async {
         session?.close();
         session = CrispasrSession.openWithParams(
           message['path'] as String,
-          backend: 'qwen3', useGpu: false, nThreads: 4, nGpuLayers: 0,
+          backend: 'qwen3', useGpu: false, nThreads: 6, nGpuLayers: 0,
         );
         final kind = session!.streamingKind;
         if (kind == 0) throw StateError('Android library has no streaming support.');
@@ -58,9 +54,6 @@ void recognitionWorker(SendPort parent) async {
       try {
         if (session == null) throw StateError('Load the model first.');
         closeStream();
-        stream = session!.openStream(
-          stepMs: 640, lengthMs: 2000, nThreads: 4, language: 'zh',
-        );
         activeRun = run;
         parent.send({'type': 'started', 'run': run});
       } catch (e) {
@@ -69,7 +62,7 @@ void recognitionWorker(SendPort parent) async {
       }
     } else if (message is Map && message['op'] == 'audio') {
       final run = message['run'] as int;
-      if (run != activeRun || stream == null) continue;
+      if (run != activeRun || session == null) continue;
       try {
         final data = message['pcm'] as Uint8List;
         final n = data.length ~/ 2;
@@ -80,11 +73,20 @@ void recognitionWorker(SendPort parent) async {
           pcm[i] = bytes.getInt16(i * 2, Endian.little) / 32768.0;
         }
         final watch = Stopwatch()..start();
-        final result = stream!.feed(pcm);
-        parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds});
-        if (result != null && result.text.trim().isNotEmpty) {
-          parent.send({'type': 'caption', 'run': run, 'text': result.text});
+        double energy = 0;
+        for (final sample in pcm) { energy += sample * sample; }
+        if (energy / n >= 0.000004) {
+          // Independent bounded utterances: only a single feed per window,
+          // no growing prefix or repeated processing of previous windows.
+          final segment = session!.openStream(stepMs: 4000, lengthMs: 4000, nThreads: 6, language: 'zh');
+          try {
+            final partial = segment.feed(pcm);
+            final finalResult = segment.flush();
+            final text = (finalResult?.text ?? partial?.text ?? '').trim();
+            if (text.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': text});
+          } finally { segment.close(); }
         }
+        parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds});
       } catch (e) {
         parent.send({'type': 'error', 'run': run, 'message': '$e'});
       }
@@ -131,6 +133,8 @@ class CaptionLedger {
     }
   }
 
+  void acceptChunk(String text) { _append(text.runes); }
+
   void _append(Iterable<int> runes) {
     for (final rune in runes) {
       final char = String.fromCharCode(rune);
@@ -176,7 +180,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _modelVerified = false;
   bool _loadingModel = false;
   bool _transferring = false;
-  int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0;
+  int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0, _skippedBytes = 0;
   double _micLevel = 0;
   final BytesBuilder _pendingAudio = BytesBuilder(copy: true);
   bool _inFlight = false;
@@ -199,9 +203,12 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   }
 
   void _pumpAudio() {
-    if (!_listening || _inFlight || _pendingAudio.length < 20480) return;
+    if (!_listening || _inFlight || _pendingAudio.length < 32000 * 3) return;
+    final queued = _pendingAudio.takeBytes();
+    final count = math.min(queued.length, 32000 * 3);
     _inFlight = true;
-    _send?.send({'op': 'audio', 'run': _run, 'pcm': _pendingAudio.takeBytes()});
+    _send?.send({'op': 'audio', 'run': _run, 'pcm': Uint8List.sublistView(queued, 0, count)});
+    if (queued.length > count) _pendingAudio.add(Uint8List.sublistView(queued, count));
   }
 
   @override
@@ -454,6 +461,9 @@ class _LiveCaptionsState extends State<LiveCaptions> {
               setState(() { _processedBytes += message['bytes'] as int; _decodeMs = message['ms'] as int; });
               _pumpAudio();
               break;
+            case 'chunkCaption':
+              if (_listening) { setState(() => _captions.acceptChunk(message['text'] as String)); unawaited(_syncOverlay()); }
+              break;
             case 'caption':
               if (_listening) {
                 setState(() => _captions.accept(message['text'] as String));
@@ -495,7 +505,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       await _overlay.invokeMethod('startMicService');
       final nextRun = ++_run;
       _captions.reset();
-      _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _micLevel = 0;
+      _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _skippedBytes = 0; _micLevel = 0;
       _pendingAudio.clear(); _inFlight = false;
       unawaited(_syncOverlay());
       _send!.send({'op': 'start', 'run': nextRun});
@@ -514,11 +524,14 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           for (var i = 0; i + 1 < bytes.length; i += 2) { final v = pcm.getInt16(i, Endian.little) / 32768.0; sum += v * v; }
           setState(() => _micLevel = math.sqrt(sum / (bytes.length ~/ 2)));
         }
-        if (_pendingAudio.length + bytes.length > 32000 * 30) {
-          _pendingAudio.clear();
-          if (mounted) setState(() => _status = 'Recognition is too slow; skipped queued audio.');
-        }
         _pendingAudio.add(bytes);
+        if (_pendingAudio.length > 32000 * 6) {
+          final queued = _pendingAudio.takeBytes();
+          final excess = queued.length - 32000 * 6;
+          _skippedBytes += excess;
+          _pendingAudio.add(Uint8List.sublistView(queued, excess));
+          if (mounted) setState(() => _status = 'CPU cannot keep up; older audio skipped.');
+        }
         _pumpAudio();
       }, onError: (Object e) { if (mounted) setState(() => _status = 'Microphone stream error: $e'); });
       if (mounted) setState(() {
@@ -568,7 +581,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
         if (_listening) ...[
           LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),
-          Text('Mic ${(20 * math.log(math.max(_micLevel, 0.00001)) / math.ln10).toStringAsFixed(0)} dBFS · received ${(_audioBytes / 32000).toStringAsFixed(1)}s · processed ${(_processedBytes / 32000).toStringAsFixed(1)}s · last decode ${_decodeMs}ms', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text('Mic ${(20 * math.log(math.max(_micLevel, 0.00001)) / math.ln10).toStringAsFixed(0)} dBFS · received ${(_audioBytes / 32000).toStringAsFixed(1)}s · processed ${(_processedBytes / 32000).toStringAsFixed(1)}s · last decode ${_decodeMs}ms · skipped ${(_skippedBytes / 32000).toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white70, fontSize: 12)),
         ],
         if (_downloading) LinearProgressIndicator(
           value: _progress == 0 ? null : _progress),
