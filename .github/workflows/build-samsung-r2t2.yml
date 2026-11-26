@@ -48,7 +48,9 @@ jobs:
           printf '\norg.gradle.vfs.watch=false\norg.gradle.parallel=false\n' >> android/gradle.properties
       - name: Install and verify Android engine
         working-directory: samsung-r2t2
-        run: python3 scripts/prepare_android_libs.py
+        run: |
+          sdkmanager "ndk;27.2.12479018"
+          python3 scripts/prepare_android_libs.py
       - name: Dependencies
         working-directory: samsung-r2t2
         run: flutter pub get
@@ -71,6 +73,18 @@ jobs:
           with zipfile.ZipFile(apk) as z:
               assert not any(n.endswith(".gguf") for n in z.namelist())
               assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
+              assert "lib/arm64-v8a/libomp.so" in z.namelist()
+              import re, subprocess, tempfile
+              system = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so", "libz.so", "libvulkan.so", "libOpenSLES.so", "libaaudio.so", "libatomic.so", "libEGL.so", "libGLESv2.so", "libjnigraphics.so"}
+              libs = {n.rsplit("/",1)[1] for n in z.namelist() if n.startswith("lib/arm64-v8a/") and n.endswith(".so")}
+              with tempfile.TemporaryDirectory() as tmp:
+                  for name in libs:
+                      dest = z.extract("lib/arm64-v8a/" + name, tmp)
+                      info = subprocess.check_output(["readelf","-d",dest], text=True)
+                      deps = set(re.findall(r"Shared library: \[(.*?)\]", info))
+                      missing = deps - libs - system
+                      assert not missing, (name, missing)
+              print("ARM64 ELF dependencies checked:", sorted(libs))
           print("Verified small APK:", apk.stat().st_size)
           PY
       - name: Verify APK signatures and alignment
@@ -84,10 +98,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v09.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v010.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v09.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v010.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -113,9 +127,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.9.0 \
+          gh release create samsung-r2t2-a16-v0.10.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.9.0" \
-            --notes "Small APK with resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.10.0" \
+            --notes "Small APK with ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
             --prerelease
