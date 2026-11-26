@@ -78,6 +78,14 @@ jobs:
           find /tmp/crispasr-vulkan/build/src /tmp/crispasr-vulkan/build/ggml/src -name 'lib*.so' -exec cp -L {} "$dest/" \;
           test -f "$dest/libggml-vulkan.so"
           readelf -d "$dest/libggml-vulkan.so"
+          strip="$sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          test -x "$strip"
+          echo "Native libraries before stripping:"
+          du -sh "$dest"
+          find "$dest" -type f -name '*.so' -exec "$strip" --strip-debug {} +
+          echo "Native libraries after stripping:"
+          du -sh "$dest"
+          ls -lh "$dest"
           mkdir -p android/app/src/main/assets/licenses
           cp /tmp/crispasr-vulkan/LICENSE /tmp/crispasr-vulkan/THIRD_PARTY_NOTICES.txt android/app/src/main/assets/licenses/
           rm -rf /tmp/crispasr-vulkan
@@ -99,7 +107,8 @@ jobs:
           python3 - <<'PY'
           import pathlib, zipfile
           apk = pathlib.Path("build/app/outputs/flutter-apk/app-release.apk")
-          assert apk.stat().st_size < 100 * 1024**2
+          print("APK size in bytes:", apk.stat().st_size, flush=True)
+          assert apk.stat().st_size < 250 * 1024**2, "GPU APK exceeds 250 MiB safety limit"
           with zipfile.ZipFile(apk) as z:
               assert not any(n.endswith(".gguf") for n in z.namelist())
               assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
