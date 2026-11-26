@@ -80,13 +80,21 @@ void recognitionWorker(SendPort parent) async {
         if (energy / n >= 0.000004) {
           // Independent bounded utterances: only a single feed per window,
           // no growing prefix or repeated processing of previous windows.
-          final segment = session!.openStream(stepMs: 4000, lengthMs: 4000, nThreads: 6, language: 'zh');
+          parent.send({'type': 'phase', 'run': run, 'phase': 'Opening stream'});
+          final segment = session!.openStream(stepMs: 1000, lengthMs: 1000, nThreads: 4, language: 'zh');
           try {
+            parent.send({'type': 'phase', 'run': run, 'phase': 'Feeding audio / decoding'});
             final partial = segment.feed(pcm);
+            final partialText = (partial?.text ?? '').trim();
+            if (partialText.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': partialText});
+            parent.send({'type': 'phase', 'run': run, 'phase': 'Finalizing stream'});
             final finalResult = segment.flush();
-            final text = (finalResult?.text ?? partial?.text ?? '').trim();
-            if (text.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': text});
-          } finally { segment.close(); }
+            final text = (finalResult?.text ?? '').trim();
+            if (text.isNotEmpty && text != partialText) {
+              final suffix = text.startsWith(partialText) ? text.substring(partialText.length).trim() : (partialText.isEmpty ? text : '');
+              if (suffix.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': suffix});
+            }
+          } finally { parent.send({'type': 'phase', 'run': run, 'phase': 'Closing stream'}); segment.close(); }
         }
         parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds});
       } catch (e) {
@@ -181,7 +189,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
-  int _gpuLayers = 4;
+  int _gpuLayers = 1;
   File? _loadMarker;
   bool _checkingRecovery = true;
 
@@ -193,6 +201,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   double _micLevel = 0;
   final BytesBuilder _pendingAudio = BytesBuilder(copy: true);
   bool _inFlight = false;
+  String _decodePhase = 'Idle';
+  DateTime? _decodeStart;
   DateTime _lastMeter = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
@@ -219,10 +229,12 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   }
 
   void _pumpAudio() {
-    if (!_listening || _inFlight || _pendingAudio.length < 32000 * 3) return;
+    if (!_listening || _inFlight || _pendingAudio.length < 32000) return;
     final queued = _pendingAudio.takeBytes();
-    final count = math.min(queued.length, 32000 * 3);
+    final count = math.min(queued.length, 32000);
     _inFlight = true;
+    _decodeStart = DateTime.now();
+    _decodePhase = 'Queued for worker';
     _send?.send({'op': 'audio', 'run': _run, 'pcm': Uint8List.sublistView(queued, 0, count)});
     if (queued.length > count) _pendingAudio.add(Uint8List.sublistView(queued, count));
   }
@@ -474,7 +486,12 @@ class _LiveCaptionsState extends State<LiveCaptions> {
               _inFlight = false;
               setState(() => _status = 'Recognition error: ${message['message']}');
               break;
+            case 'phase':
+              setState(() => _decodePhase = message['phase'] as String);
+              break;
             case 'processed':
+              _decodeStart = null;
+              _decodePhase = 'Completed';
               _inFlight = false;
               setState(() { _processedBytes += message['bytes'] as int; _decodeMs = message['ms'] as int; });
               _pumpAudio();
@@ -524,7 +541,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       final nextRun = ++_run;
       _captions.reset();
       _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _skippedBytes = 0; _micLevel = 0;
-      _pendingAudio.clear(); _inFlight = false;
+      _pendingAudio.clear(); _inFlight = false; _decodeStart = null; _decodePhase = 'Idle';
       unawaited(_syncOverlay());
       _send!.send({'op': 'start', 'run': nextRun});
       final audio = await _recorder.startStream(const RecordConfig(
@@ -597,10 +614,11 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         )),
         const SizedBox(height: 15),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery)
-          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers (recommended test)')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer (recommended test)')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
         if (_listening) ...[
           LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),
+          Text('Inference: $_decodePhase · ${_decodeStart == null ? 0 : DateTime.now().difference(_decodeStart!).inSeconds}s running · queue ${(_pendingAudio.length / 32000).toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white, fontSize: 13)),
           Text('Mic ${(20 * math.log(math.max(_micLevel, 0.00001)) / math.ln10).toStringAsFixed(0)} dBFS · received ${(_audioBytes / 32000).toStringAsFixed(1)}s · processed ${(_processedBytes / 32000).toStringAsFixed(1)}s · last decode ${_decodeMs}ms · skipped ${(_skippedBytes / 32000).toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white70, fontSize: 12)),
         ],
         if (_downloading) LinearProgressIndicator(
