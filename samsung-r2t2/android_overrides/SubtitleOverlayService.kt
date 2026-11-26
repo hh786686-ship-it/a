@@ -34,6 +34,7 @@ class SubtitleOverlayService : Service() {
         const val ACTION_SHOW = "livechinese.show"
         const val CHANNEL = "livechinese_microphone"
         private const val ID = 46
+        var onDismiss: (() -> Unit)? = null
         var instance: SubtitleOverlayService? = null
             private set
     }
@@ -210,7 +211,7 @@ class SubtitleOverlayService : Service() {
         }
         alphaRow.addView(alpha, LinearLayout.LayoutParams(0, dp(31), 1f))
 
-        action("×") { stopSelf() }
+        action("×") { onDismiss?.invoke(); stopSelf() }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(24)))
         toolbarControls = toolbar
         root.addView(alphaRow, LinearLayout.LayoutParams(-1, dp(31)))
@@ -281,7 +282,11 @@ class SubtitleOverlayService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    saveSettings()
+                    val p = params
+                    if (event.actionMasked == MotionEvent.ACTION_UP && p != null && event.rawY - downY > dp(48) && event.rawY > resources.displayMetrics.heightPixels - dp(80)) {
+                        onDismiss?.invoke()
+                        stopSelf()
+                    } else saveSettings()
                     true
                 }
                 else -> false

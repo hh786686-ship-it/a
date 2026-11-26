@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
@@ -58,7 +59,7 @@ void recognitionWorker(SendPort parent) async {
         if (session == null) throw StateError('Load the model first.');
         closeStream();
         stream = session!.openStream(
-          stepMs: 160, lengthMs: 2000, nThreads: 4, language: 'zh',
+          stepMs: 640, lengthMs: 2000, nThreads: 4, language: 'zh',
         );
         activeRun = run;
         parent.send({'type': 'started', 'run': run});
@@ -78,7 +79,9 @@ void recognitionWorker(SendPort parent) async {
         for (var i = 0; i < n; ++i) {
           pcm[i] = bytes.getInt16(i * 2, Endian.little) / 32768.0;
         }
+        final watch = Stopwatch()..start();
         final result = stream!.feed(pcm);
+        parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds});
         if (result != null && result.text.trim().isNotEmpty) {
           parent.send({'type': 'caption', 'run': run, 'text': result.text});
         }
@@ -172,9 +175,37 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
+  int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0;
+  double _micLevel = 0;
+  final BytesBuilder _pendingAudio = BytesBuilder(copy: true);
+  bool _inFlight = false;
+  DateTime _lastMeter = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _overlay.setMethodCallHandler((call) async {
+      if (call.method == 'overlayDismissed') {
+        _overlayVisible = false;
+        if (_listening) await _toggleMic();
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final file = await _modelPath();
+      if (mounted && await file.exists() && await file.length() == modelBytes) await _load();
+    });
+  }
+
+  void _pumpAudio() {
+    if (!_listening || _inFlight || _pendingAudio.length < 20480) return;
+    _inFlight = true;
+    _send?.send({'op': 'audio', 'run': _run, 'pcm': _pendingAudio.takeBytes()});
+  }
 
   @override
   void dispose() {
+    _overlay.setMethodCallHandler(null);
     _downloadClient?.close(force: true);
     _micSub?.cancel();
     _recorder.stop();
@@ -357,11 +388,16 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     setState(() => _status = 'Loading model into phone memory…');
     _updates = ReceivePort();
     try {
-      _worker = await Isolate.spawn(recognitionWorker, _updates!.sendPort);
+      _worker = await Isolate.spawn(recognitionWorker, _updates!.sendPort, onError: _updates!.sendPort, onExit: _updates!.sendPort);
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
           _send!.send({'op': 'load', 'path': model.path});
+        } else if ((message == null || message is List) && mounted) {
+          _micSub?.cancel();
+          unawaited(_recorder.stop());
+          _updates?.close(); _updates = null; _send = null; _worker = null;
+          setState(() { _loaded = false; _listening = false; _status = 'Recognition worker stopped: ${message ?? "possibly low memory"}'; });
         } else if (message is Map && mounted) {
           final run = message['run'];
           if (run is int && run != _run) return;
@@ -374,7 +410,13 @@ class _LiveCaptionsState extends State<LiveCaptions> {
               break;
             case 'error':
               if (!_loaded) { _updates?.close(); _updates = null; _worker?.kill(); _worker = null; _send = null; }
+              _inFlight = false;
               setState(() => _status = 'Recognition error: ${message['message']}');
+              break;
+            case 'processed':
+              _inFlight = false;
+              setState(() { _processedBytes += message['bytes'] as int; _decodeMs = message['ms'] as int; });
+              _pumpAudio();
               break;
             case 'caption':
               if (_listening) {
@@ -415,6 +457,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       }
       final nextRun = ++_run;
       _captions.reset();
+      _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _micLevel = 0;
+      _pendingAudio.clear(); _inFlight = false;
       unawaited(_syncOverlay());
       _send!.send({'op': 'start', 'run': nextRun});
       final audio = await _recorder.startStream(const RecordConfig(
@@ -423,8 +467,22 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         autoGain: false, echoCancel: false, noiseSuppress: false,
       ));
       _micSub = audio.listen((bytes) {
-        _send?.send({'op': 'audio', 'run': nextRun, 'pcm': bytes});
-      });
+        _audioBytes += bytes.length;
+        final now = DateTime.now();
+        if (now.difference(_lastMeter).inMilliseconds >= 250 && bytes.length >= 2 && mounted) {
+          _lastMeter = now;
+          final pcm = ByteData.sublistView(bytes);
+          double sum = 0;
+          for (var i = 0; i + 1 < bytes.length; i += 2) { final v = pcm.getInt16(i, Endian.little) / 32768.0; sum += v * v; }
+          setState(() => _micLevel = math.sqrt(sum / (bytes.length ~/ 2)));
+        }
+        if (_pendingAudio.length + bytes.length > 32000 * 30) {
+          _pendingAudio.clear();
+          if (mounted) setState(() => _status = 'Recognition is too slow; skipped queued audio.');
+        }
+        _pendingAudio.add(bytes);
+        _pumpAudio();
+      }, onError: (Object e) { if (mounted) setState(() => _status = 'Microphone stream error: $e'); });
       if (mounted) setState(() {
         _listening = true;
         _status = 'Listening to phone speaker…';
@@ -469,6 +527,10 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         )),
         const SizedBox(height: 15),
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
+        if (_listening) ...[
+          LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),
+          Text('Mic ${(20 * math.log(math.max(_micLevel, 0.00001)) / math.ln10).toStringAsFixed(0)} dBFS · received ${(_audioBytes / 32000).toStringAsFixed(1)}s · processed ${(_processedBytes / 32000).toStringAsFixed(1)}s · last decode ${_decodeMs}ms', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+        ],
         if (_downloading) LinearProgressIndicator(
           value: _progress == 0 ? null : _progress),
         const SizedBox(height: 8),

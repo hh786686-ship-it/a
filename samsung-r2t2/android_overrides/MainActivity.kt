@@ -16,8 +16,9 @@ class MainActivity : FlutterActivity() {
     private val channelName = "livechinese/overlay"
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
-            .setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        SubtitleOverlayService.onDismiss = { channel.invokeMethod("overlayDismissed", null) }
+        channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "availableStorage" -> {
                         val path = call.argument<String>("path")
