@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ffi' as ffi;
+import 'package:ffi/ffi.dart';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
@@ -21,6 +23,13 @@ void main() => runApp(const MaterialApp(
   home: LiveCaptions(), debugShowCheckedModeBanner: false,
 ));
 
+void setNativeEnv(String key, String value) {
+  final fn = ffi.DynamicLibrary.open('libc.so').lookupFunction<ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Int32), int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, int)>('setenv');
+  final k = key.toNativeUtf8(), v = value.toNativeUtf8();
+  try { if (fn(k, v, 1) != 0) throw StateError('Cannot set $key'); }
+  finally { calloc.free(k); calloc.free(v); }
+}
+
 /// Recognition runs outside the UI isolate to keep the microphone and screen responsive.
 void recognitionWorker(SendPort parent) async {
   final inbox = ReceivePort();
@@ -39,10 +48,14 @@ void recognitionWorker(SendPort parent) async {
         session?.close();
         final layers = message['layers'] as int? ?? 0;
         if (layers > 0) setGpuBackend('vulkan');
+        // Native cache environment is configured before the session opens.
+        setNativeEnv('CRISPASR_KV_QUANT', message['compact'] == true ? 'q8_0' : 'f16');
+        setNativeEnv('CRISPASR_KV_ON_CPU', message['cpuCache'] == true ? '1' : '0');
         session = CrispasrSession.openWithParams(
           message['path'] as String,
-          backend: 'qwen3', useGpu: layers > 0, nThreads: 4, nGpuLayers: layers, flashAttn: false, verbosity: 1,
+          backend: 'qwen3', useGpu: layers > 0, nThreads: message['threads'] as int? ?? 4, nGpuLayers: layers, flashAttn: false, verbosity: 1,
         );
+        session!.setMaxNewTokens(64);
         parent.send({'type': 'ready', 'kind': 0});
       } catch (e) {
         try { session?.close(); } catch (_) {}
@@ -176,7 +189,10 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
-  int _gpuLayers = 1;
+  int _gpuLayers = 2;
+  bool _compactCache = true;
+  bool _cpuCache = false;
+  int _cpuThreads = 4;
   File? _loadMarker;
   bool _checkingRecovery = true;
 
@@ -451,7 +467,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path, 'layers': layers});
+          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'compact': _compactCache, 'cpuCache': _cpuCache});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
@@ -601,7 +617,12 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         )),
         const SizedBox(height: 15),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery)
-          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer (recommended test)')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer')), DropdownMenuItem(value: 2, child: Text('GPU 2 layers (default)')), DropdownMenuItem(value: 3, child: Text('GPU 3 layers')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
+        if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery) ...[
+          SwitchListTile(title: const Text('Compact Q8 KV cache', style: TextStyle(color: Colors.white)), value: _compactCache, onChanged: (v) => setState(() => _compactCache = v)),
+          SwitchListTile(title: const Text('Keep KV cache on CPU', style: TextStyle(color: Colors.white)), value: _cpuCache, onChanged: (v) => setState(() => _cpuCache = v)),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _cpuThreads, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 2, child: Text('2 CPU threads')), DropdownMenuItem(value: 4, child: Text('4 CPU threads')), DropdownMenuItem(value: 6, child: Text('6 CPU threads'))], onChanged: (v) { if (v != null) setState(() => _cpuThreads = v); }),
+        ],
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
         if (_listening) ...[
           LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),
