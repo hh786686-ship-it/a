@@ -98,6 +98,28 @@ jobs:
               print("ARM64 ELF dependencies checked:", sorted(libs))
           print("Verified small APK:", apk.stat().st_size)
           PY
+      - name: Sign with permanent release key
+        working-directory: samsung-r2t2
+        env:
+          SIGNING_SECRET: ${{ secrets.LIVECHINESE_SIGNING_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_SECRET" ]]; then
+            echo "::error::Missing repository secret LIVECHINESE_SIGNING_SECRET"
+            exit 1
+          fi
+          umask 077
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          export SIGNING_PASSWORD="${SIGNING_SECRET%%:*}"
+          printf '%s' "${SIGNING_SECRET#*:}" | base64 -d > "$key"
+          unset SIGNING_SECRET
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          "$tools/apksigner" sign --ks "$key" --ks-type PKCS12 --ks-key-alias livechinese --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD --out "$apk.signed" "$apk"
+          mv "$apk.signed" "$apk"
+          rm -f "$apk.signed.idsig"
+          "$tools/apksigner" verify --print-certs "$apk" | grep -i 'certificate SHA-256 digest: 75d049ba8c0cf82a518fe2cad70a725df5279257f4d73f74bd681523c75931d4'
       - name: Verify APK signatures and alignment
         working-directory: samsung-r2t2
         run: |
@@ -109,10 +131,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v012.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v013.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v012.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v013.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -129,6 +151,8 @@ jobs:
           disable-animations: true
           script: |
             adb install -r samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
+            adb shell run-as org.livechinese.r2t2_live_chinese true || true
+            adb install -r samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
             adb shell pm path org.livechinese.r2t2_live_chinese | grep 'package:'
             adb shell am start -W -n org.livechinese.r2t2_live_chinese/.MainActivity
             sleep 8
@@ -138,9 +162,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.12.0 \
+          gh release create samsung-r2t2-a16-v0.13.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.12.0" \
-            --notes "Small APK with ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.13.0" \
+            --notes "Permanently signed APK with model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
             --prerelease

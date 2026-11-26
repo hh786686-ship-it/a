@@ -175,6 +175,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
+  bool _transferring = false;
   int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0;
   double _micLevel = 0;
   final BytesBuilder _pendingAudio = BytesBuilder(copy: true);
@@ -274,8 +275,41 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     return digest.toString() == modelHash;
   }
 
+  Future<void> _transferModel(bool exporting) async {
+    if (_transferring || _downloading || _loadingModel || (!exporting && _loaded)) return;
+    setState(() { _transferring = true; _status = exporting ? 'Choose a destination for model backup…' : 'Choose your GGUF model file…'; });
+    File? temporary;
+    try {
+      final file = await _modelPath();
+      if (exporting) {
+        if (!_modelVerified && !await _verifyModel(file)) throw StateError('No verified model to export.');
+        final ok = await _overlay.invokeMethod<bool>('exportModel', {'path': file.path}) ?? false;
+        if (mounted) setState(() => _status = ok ? 'Model backup saved.' : 'Backup cancelled.');
+      } else {
+        if (await _verifyModel(file)) {
+          _modelVerified = true;
+          if (mounted) setState(() => _status = 'Verified model already present.');
+          return;
+        }
+        temporary = File('${file.path}.import');
+        final ok = await _overlay.invokeMethod<bool>('importModel', {'path': temporary.path}) ?? false;
+        if (!ok) { if (mounted) setState(() => _status = 'Import cancelled.'); return; }
+        if (mounted) setState(() => _status = 'Verifying imported model…');
+        if (!await _verifyModel(temporary)) throw StateError('Incorrect model SHA-256.');
+        await temporary.rename(file.path);
+        _modelVerified = true;
+        if (mounted) setState(() => _status = 'Imported verified model. Tap Load model.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Model transfer error: $e');
+    } finally {
+      if (temporary != null && await temporary.exists()) await temporary.delete();
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
   Future<void> _download() async {
-    if (_downloading || _loaded || _loadingModel) return;
+    if (_downloading || _loaded || _loadingModel || _transferring) return;
     _pauseDownload = false;
     setState(() { _downloading = true; _status = 'Checking model and free space…'; });
     try {
@@ -372,7 +406,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
 
   Future<void> _load() async {
     if (_loaded || _updates != null || _downloading) return;
-    if (_loadingModel) return;
+    if (_loadingModel || _transferring) return;
     _loadingModel = true;
     final model = await _modelPath();
     if (mounted) setState(() => _status = 'Checking installed model…');
@@ -544,6 +578,10 @@ class _LiveCaptionsState extends State<LiveCaptions> {
             child: Text(_downloading ? 'Pause download' : '1. Download / resume')),
           ElevatedButton(onPressed: (_loaded || _downloading) ? null : _load,
             child: const Text('2. Load model')),
+          ElevatedButton(onPressed: (_transferring || _downloading || _loaded || _loadingModel) ? null : () => _transferModel(false),
+            child: const Text('Import model')),
+          ElevatedButton(onPressed: (_transferring || _downloading || !_modelVerified) ? null : () => _transferModel(true),
+            child: const Text('Backup model')),
           ElevatedButton(onPressed: _toggleMic,
             child: Text(_listening ? 'Stop listening' : '3. Start listening')),
           ElevatedButton(onPressed: _showOverlay,

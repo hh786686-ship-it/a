@@ -25,6 +25,49 @@ class MainActivity : FlutterActivity() {
         return engine
     }
     override fun shouldDestroyEngineWithHost(): Boolean = false
+    private var transferResult: MethodChannel.Result? = null
+    private var transferPath: String? = null
+    private var exporting = false
+    @Deprecated("Activity result API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 6051) return
+        val reply = transferResult ?: return
+        val path = transferPath ?: return
+        val isExport = exporting
+        transferResult = null
+        transferPath = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) { reply.success(false); return }
+        val resolver = applicationContext.contentResolver
+        Thread {
+            try {
+                val file = java.io.File(path)
+                if (isExport) {
+                    val output = resolver.openOutputStream(uri, "w") ?: error("Cannot open destination")
+                    output.use { out -> file.inputStream().use { it.copyTo(out, 1024 * 1024) } }
+                } else {
+                    val input = resolver.openInputStream(uri) ?: error("Cannot open model")
+                    input.use { source -> file.outputStream().use { out ->
+                        val buffer = ByteArray(1024 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = source.read(buffer)
+                            if (n < 0) break
+                            total += n
+                            require(total <= 1490915264L) { "Model file too large" }
+                            out.write(buffer, 0, n)
+                        }
+                        require(total == 1490915264L) { "Incorrect model size" }
+                    } }
+                }
+                runOnUiThread { reply.success(true) }
+            } catch (e: Exception) {
+                if (!isExport) java.io.File(path).delete()
+                runOnUiThread { reply.error("TRANSFER", e.message, null) }
+            }
+        }.start()
+    }
     private val channelName = "livechinese/overlay"
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -32,6 +75,26 @@ class MainActivity : FlutterActivity() {
         SubtitleOverlayService.onDismiss = { channel.invokeMethod("overlayDismissed", null) }
         channel.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "importModel", "exportModel" -> {
+                        if (transferResult != null) { result.error("BUSY", "Transfer already active", null) }
+                        else {
+                            val path = call.argument<String>("path")
+                            if (path == null) result.error("PATH", "Missing model path", null)
+                            else try {
+                                exporting = call.method == "exportModel"
+                                val picker = Intent(if (exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT)
+                                picker.addCategory(Intent.CATEGORY_OPENABLE)
+                                picker.type = if (exporting) "application/octet-stream" else "*/*"
+                                if (exporting) picker.putExtra(Intent.EXTRA_TITLE, "confucius4-r2t2-q4_k.gguf")
+                                transferResult = result
+                                transferPath = path
+                                startActivityForResult(picker, 6051)
+                            } catch (e: Exception) {
+                                transferResult = null; transferPath = null
+                                result.error("PICKER", e.message, null)
+                            }
+                        }
+                    }
                     "availableStorage" -> {
                         val path = call.argument<String>("path")
                         if (path == null) result.error("STORAGE", "Missing path", null)
