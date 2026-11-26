@@ -60,12 +60,16 @@ jobs:
           git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr-vulkan
           spirv_config="$(dpkg -L spirv-headers | grep -iE '/spirv-headers(config|-config)[.]cmake' | head -1)"
           test -f "$spirv_config"
+          # Use recent Khronos headers, isolated from host libc headers.
+          git clone --depth 1 --branch v1.4.328 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/vulkan-headers
+          test -f /tmp/vulkan-headers/include/vulkan/vulkan.hpp
+          test -f /tmp/vulkan-headers/include/vulkan/vulkan_core.h
           cmake -S /tmp/crispasr-vulkan -B /tmp/crispasr-vulkan/build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
             -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_EXAMPLES=OFF -DCRISPASR_BUILD_SERVER=OFF \
-            -DGGML_VULKAN=ON -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
+            -DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/tmp/vulkan-headers/include -DCMAKE_CXX_FLAGS=-I/tmp/vulkan-headers/include -DCMAKE_C_FLAGS=-I/tmp/vulkan-headers/include -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
           cmake --build /tmp/crispasr-vulkan/build --target crispasr-lib -j 2
           dest="$PWD/android/app/src/main/jniLibs/arm64-v8a"
           find /tmp/crispasr-vulkan/build/src /tmp/crispasr-vulkan/build/ggml/src -name 'lib*.so' -exec cp -L {} "$dest/" \;
