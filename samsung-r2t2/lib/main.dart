@@ -39,7 +39,7 @@ void recognitionWorker(SendPort parent) async {
         session?.close();
         session = CrispasrSession.openWithParams(
           message['path'] as String,
-          backend: 'qwen3', useGpu: false, nThreads: 6, nGpuLayers: 0,
+          backend: 'qwen3', useGpu: message['gpu'] != false, nThreads: 4, nGpuLayers: message['gpu'] == false ? 0 : 99,
         );
         final kind = session!.streamingKind;
         if (kind == 0) throw StateError('Android library has no streaming support.');
@@ -179,6 +179,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
+  bool _gpu = true;
   bool _transferring = false;
   int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0, _skippedBytes = 0;
   double _micLevel = 0;
@@ -198,7 +199,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final file = await _modelPath();
-      if (mounted && await file.exists() && await file.length() == modelBytes) await _load();
+      // Experimental GPU mode must be explicitly loaded so CPU remains selectable.
     });
   }
 
@@ -435,7 +436,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path});
+          _send!.send({'op': 'load', 'path': model.path, 'gpu': _gpu});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
@@ -446,7 +447,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           if (run is int && run != _run) return;
           switch (message['type']) {
             case 'ready':
-              setState(() { _loaded = true; _status = 'Ready. Tap Start listening.'; });
+              setState(() { _loaded = true; _status = _gpu ? 'GPU requested. Tap Start listening.' : 'CPU mode ready. Tap Start listening.'; });
               break;
             case 'started':
               setState(() => _status = 'Listening to phone speaker…');
@@ -578,6 +579,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           ),
         )),
         const SizedBox(height: 15),
+        if (!_loaded && !_loadingModel && _updates == null) SwitchListTile(title: const Text('Experimental Vulkan GPU', style: TextStyle(color: Colors.white)), value: _gpu, onChanged: (v) => setState(() => _gpu = v)),
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
         if (_listening) ...[
           LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),

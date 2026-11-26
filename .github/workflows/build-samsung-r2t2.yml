@@ -55,6 +55,23 @@ jobs:
           test -x "$manager"
           "$manager" --sdk_root="$sdk" "ndk;27.2.12479018"
           python3 scripts/prepare_android_libs.py
+          sudo apt-get update
+          sudo apt-get install -y glslc libvulkan-dev
+          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr-vulkan
+          cmake -S /tmp/crispasr-vulkan -B /tmp/crispasr-vulkan/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+            -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_EXAMPLES=OFF -DCRISPASR_BUILD_SERVER=OFF \
+            -DGGML_VULKAN=ON -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
+          cmake --build /tmp/crispasr-vulkan/build --target crispasr-lib -j 2
+          dest="$PWD/android/app/src/main/jniLibs/arm64-v8a"
+          find /tmp/crispasr-vulkan/build/src /tmp/crispasr-vulkan/build/ggml/src -name 'lib*.so' -exec cp -L {} "$dest/" \;
+          test -f "$dest/libggml-vulkan.so"
+          readelf -d "$dest/libggml-vulkan.so"
+          mkdir -p android/app/src/main/assets/licenses
+          cp /tmp/crispasr-vulkan/LICENSE /tmp/crispasr-vulkan/THIRD_PARTY_NOTICES.txt android/app/src/main/assets/licenses/
+          rm -rf /tmp/crispasr-vulkan
       - name: Dependencies
         working-directory: samsung-r2t2
         run: flutter pub get
@@ -78,6 +95,7 @@ jobs:
               assert not any(n.endswith(".gguf") for n in z.namelist())
               assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
               assert "lib/arm64-v8a/libomp.so" in z.namelist()
+              assert "lib/arm64-v8a/libggml-vulkan.so" in z.namelist()
               import re, subprocess, tempfile, os, json
               sdk = pathlib.Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk")
               ndk = sdk / "ndk" / "27.2.12479018"
@@ -131,10 +149,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v014.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v015.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v014.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v015.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -162,9 +180,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.14.0 \
+          gh release create samsung-r2t2-a16-v0.15.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.14.0" \
-            --notes "Bounded independent recognition windows, silence gating, six CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.15.0" \
+            --notes "Experimental Vulkan GPU engine with selectable CPU mode; bounded independent recognition windows, silence gating, six CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
             --prerelease
