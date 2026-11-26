@@ -32,6 +32,9 @@ import kotlin.math.roundToInt
 class SubtitleOverlayService : Service() {
     companion object {
         const val ACTION_SHOW = "livechinese.show"
+        const val ACTION_WARM = "livechinese.warm"
+        const val ACTION_MIC = "livechinese.mic"
+        const val ACTION_IDLE = "livechinese.idle"
         const val CHANNEL = "livechinese_microphone"
         private const val ID = 46
         var onDismiss: (() -> Unit)? = null
@@ -58,6 +61,9 @@ class SubtitleOverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private lateinit var note: Notification
+    private var micActive = false
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -75,24 +81,44 @@ class SubtitleOverlayService : Service() {
         val openIntent = Intent(this, MainActivity::class.java)
         val pending = PendingIntent.getActivity(this, 0, openIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val note = Notification.Builder(this, CHANNEL)
+        note = Notification.Builder(this, CHANNEL)
             .setContentTitle("Live Chinese subtitles")
-            .setContentText("Floating captions are enabled")
+            .setContentText("Keeping the speech model ready")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pending)
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= 29) {
+        setMicActive(false)
+    }
+
+    fun setMicActive(active: Boolean) {
+        micActive = active
+        if (Build.VERSION.SDK_INT >= 34) {
+            val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                (if (active) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+            startForeground(ID, note, type)
+        } else if (Build.VERSION.SDK_INT >= 29 && active) {
             startForeground(ID, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
         } else {
             startForeground(ID, note)
         }
     }
 
+    fun hideOverlay() {
+        saveSettings()
+        val view = bubble
+        bubble = null
+        if (view != null) try { manager.removeView(view) } catch (_: Exception) {}
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_WARM -> return START_NOT_STICKY
+            ACTION_MIC -> { setMicActive(true); return START_NOT_STICKY }
+            ACTION_IDLE -> { setMicActive(false); return START_NOT_STICKY }
+        }
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "Enable Display over other apps first.", Toast.LENGTH_LONG).show()
-            stopSelf()
             return START_NOT_STICKY
         }
         if (bubble == null) showOverlay()
@@ -211,7 +237,7 @@ class SubtitleOverlayService : Service() {
         }
         alphaRow.addView(alpha, LinearLayout.LayoutParams(0, dp(31), 1f))
 
-        action("×") { onDismiss?.invoke(); stopSelf() }
+        action("×") { onDismiss?.invoke(); hideOverlay() }
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(24)))
         toolbarControls = toolbar
         root.addView(alphaRow, LinearLayout.LayoutParams(-1, dp(31)))
@@ -285,7 +311,7 @@ class SubtitleOverlayService : Service() {
                     val p = params
                     if (event.actionMasked == MotionEvent.ACTION_UP && p != null && event.rawY - downY > dp(48) && event.rawY > resources.displayMetrics.heightPixels - dp(80)) {
                         onDismiss?.invoke()
-                        stopSelf()
+                        hideOverlay()
                     } else saveSettings()
                     true
                 }

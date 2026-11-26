@@ -385,6 +385,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       setState(() => _status = 'Tap Download / resume to obtain the verified model first.');
       return;
     }
+    try { await _overlay.invokeMethod('keepModelWarm'); } catch (_) {}
+    if (!mounted) return;
     setState(() => _status = 'Loading model into phone memory…');
     _updates = ReceivePort();
     try {
@@ -442,6 +444,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         await _micSub?.cancel();
         _micSub = null;
         await _recorder.stop();
+        try { await _overlay.invokeMethod('stopMicService'); } catch (_) {}
         _send?.send({'op': 'stop', 'run': _run});
         if (mounted) setState(() { _listening = false; _status = 'Stopped'; });
         // Keep the overlay visible to preserve the last subtitles.
@@ -455,6 +458,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         if (mounted) setState(() => _status = 'Microphone permission is needed.');
         return;
       }
+      await _overlay.invokeMethod('startMicService');
       final nextRun = ++_run;
       _captions.reset();
       _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _micLevel = 0;
@@ -489,6 +493,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       });
     } catch (e) {
       _send?.send({'op': 'stop', 'run': _run});
+      try { await _overlay.invokeMethod('stopMicService'); } catch (_) {}
       if (mounted) setState(() => _status = 'Microphone error: $e');
     } finally {
       _busy = false;
