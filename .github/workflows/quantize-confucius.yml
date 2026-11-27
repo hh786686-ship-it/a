@@ -15,7 +15,7 @@ jobs:
         run: |
           git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git engine
           cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_SERVER=OFF -DGGML_NATIVE=OFF
-          cmake --build engine/build --target crispasr-quantize crispasr -j 2
+          cmake --build engine/build --target crispasr-quantize crispasr-cli -j 2
       - name: Download and verify original Q4
         run: |
           curl --fail --location --retry 4 'https://huggingface.co/cstr/confucius4-r2t2-GGUF/resolve/main/confucius4-r2t2-q4_k.gguf?download=true' -o q4.gguf
@@ -34,7 +34,7 @@ jobs:
           done
           for model in q4.gguf results/q3_k.gguf results/q2_k.gguf; do
             name="$(basename "$model" .gguf)"
-            /usr/bin/time -v engine/build/bin/crispasr -m "$model" -f test.wav -l zh -t 4 2>&1 | tee "results/$name-recognition.log"
+            /usr/bin/time -v engine/build/bin/crispasr -m "$model" -f test.wav --backend qwen3 -l zh -t 4 2>&1 | tee "results/$name-recognition.log"
           done
           sha256sum results/*.gguf > results/checksums.txt
           ls -lh results
