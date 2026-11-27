@@ -1,4 +1,4 @@
-name: Test Q3 split-prefill prerequisite
+name: Test Q3 streaming repetition correction
 on:
   workflow_dispatch:
   push:
@@ -24,38 +24,45 @@ jobs:
           sudo apt-get install -y espeak-ng ffmpeg
           espeak-ng -v cmn -s 145 -w speech.wav '你好，今天天气很好。我们一起去公园散步。'
           ffmpeg -y -i speech.wav -ar 16000 -ac 1 -c:a pcm_s16le test.wav
-      - name: Baseline and split-prefill prerequisite test
+      - name: Compare stock and corrected streaming
         run: |
           set -euo pipefail
           mkdir -p results
           /usr/bin/time -v engine/build/bin/crispasr -m q3.gguf -f test.wav --backend qwen3 -l zh -t 4 2>&1 | tee results/baseline.log
+          timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/stock.json --step-ms 1000 --lookahead-ms 0 -t 4
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('engine/src/core/qwen3_stream_model.h')
+          p=Path('engine/src/core/qwen3_stream.h')
           s=p.read_text()
-          old='qwen3_asr_kv_reset(ctx_);\n    int n_t = 0, vocab = 0;\n    float* logits = qwen3_asr_run_llm_kv(ctx_, emb, prompt_len, 0, &n_t, &vocab);'
-          assert s.count(old)==1
-          # Compare only embeddings before the first audio placeholder.
-          # Audio is bidirectional, so its previous embeddings cannot safely
-          # be assumed stable when additional audio arrives.
-          new='''int prefix_len = 0;
-              while (prefix_len < prompt_len - 1 && ids[prefix_len] != audio_pad_id) ++prefix_len;
-              qwen3_asr_kv_reset(ctx_);
-              int n_t = 0, vocab = 0;
-              if (prefix_len > 0) {
-                  float* prefix_logits = qwen3_asr_run_llm_kv(ctx_, emb, prefix_len, 0, &n_t, &vocab);
-                  if (!prefix_logits) { free(emb); return {}; }
-                  free(prefix_logits);
-              }
-              float* logits = qwen3_asr_run_llm_kv(ctx_, emb + (size_t)prefix_len * pdim, prompt_len - prefix_len, prefix_len, &n_t, &vocab);'''
-          p.write_text(s.replace(old,new))
+          # Do not feed unstable text back into the next generation.
+          # Decode from the full audio with an empty prefix instead.
+          old='r.prefix = prefix;'
+          assert s.count(old)==2
+          s=s.replace(old,'prefix.clear();\n    r.prefix = prefix;')
+          # Give complete hypotheses a bounded but sufficient token budget.
+          old='h.generate(st.audio_accum, utf8_encode(prefix), max_new_tokens)'
+          assert s.count(old)==2
+          s=s.replace(old,'h.generate(st.audio_accum, utf8_encode(prefix), std::max(64, max_new_tokens))')
+          p.write_text(s)
           PY
           cmake --build engine/build --target crispasr-cli -j 2
-          timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/split.json --step-ms 1000 --lookahead-ms 0 -t 4
+          timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/corrected.json --step-ms 1000 --lookahead-ms 0 -t 4
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          expected='你好今天天气很好我们一起去公园散步'
+          def normalize(s):
+              return ''.join(re.findall(r'[\u4e00-\u9fff]',s or ''))
+          for name in ('stock','corrected'):
+              d=json.loads(Path('results/'+name+'.json').read_text())
+              print(name, 'calls:',len(d['calls']), 'transcript:',d['completed'])
+          corrected=json.loads(Path('results/corrected.json').read_text())
+          assert normalize(corrected['completed'])==expected, 'Corrected streaming failed exact Mandarin transcript gate'
+          PY
       - name: Upload benchmark logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: q3-cache-test
+          name: q3-stream-correction
           path: results/
           if-no-files-found: warn
