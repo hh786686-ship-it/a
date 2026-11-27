@@ -1,0 +1,205 @@
+name: Build Samsung A16 Confucius4-R2T2 APK
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build-r2t2-samsung-a16-20261124
+    paths:
+      - 'samsung-r2t2/**'
+      - '.github/workflows/build-samsung-r2t2.yml'
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Reclaim runner disk for large offline model
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af || true
+          sudo apt-get clean
+          df -h
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Check Flutter
+        run: flutter --version
+      - name: Create Android scaffold
+        working-directory: samsung-r2t2
+        run: |
+          flutter create --platforms=android --project-name=r2t2_live_chinese --org=org.livechinese .
+          cp android_overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          cp android_overrides/MainActivity.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/MainActivity.kt
+          cp android_overrides/SubtitleOverlayService.kt android/app/src/main/kotlin/org/livechinese/r2t2_live_chinese/SubtitleOverlayService.kt
+          rm -f test/widget_test.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("android/app/build.gradle.kts")
+          text = p.read_text()
+          assert "android {" in text
+          p.write_text(text.replace("android {", 'android {\n    androidResources { noCompress += "gguf" }', 1))
+          PY
+          printf '\norg.gradle.vfs.watch=false\norg.gradle.parallel=false\n' >> android/gradle.properties
+      - name: Install and verify Android engine
+        working-directory: samsung-r2t2
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          export ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk"
+          manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
+          test -x "$manager"
+          "$manager" --sdk_root="$sdk" "ndk;27.2.12479018"
+          python3 scripts/prepare_android_libs.py
+          sudo apt-get update
+          sudo apt-get install -y glslc glslang-tools libvulkan-dev spirv-headers
+          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr-vulkan
+          python3 scripts/tune_qwen3.py /tmp/crispasr-vulkan
+          spirv_config="$(dpkg -L spirv-headers | grep -iE '/spirv-headers(config|-config)[.]cmake' | head -1)"
+          test -f "$spirv_config"
+          # Use recent Khronos headers, isolated from host libc headers.
+          git clone --depth 1 --branch v1.4.328 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/vulkan-headers
+          test -f /tmp/vulkan-headers/include/vulkan/vulkan.hpp
+          test -f /tmp/vulkan-headers/include/vulkan/vulkan_core.h
+          mkdir -p /tmp/vulkan-headers/include/spirv
+          cp -a /usr/include/spirv/. /tmp/vulkan-headers/include/spirv/
+          test -f /tmp/vulkan-headers/include/spirv/unified1/spirv.hpp
+          cmake -S /tmp/crispasr-vulkan -B /tmp/crispasr-vulkan/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DCMAKE_CXX_MODULE_STD=OFF -DCMAKE_CXX_COMPILER_IMPORT_STD= \
+            -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_EXAMPLES=OFF -DCRISPASR_BUILD_SERVER=OFF \
+            -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod -DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/tmp/vulkan-headers/include -DCMAKE_CXX_FLAGS=-I/tmp/vulkan-headers/include -DCMAKE_C_FLAGS=-I/tmp/vulkan-headers/include -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
+          cmake --build /tmp/crispasr-vulkan/build --target crispasr-lib -j 2
+          dest="$PWD/android/app/src/main/jniLibs/arm64-v8a"
+          find /tmp/crispasr-vulkan/build/src /tmp/crispasr-vulkan/build/ggml/src -name 'lib*.so' -exec cp -L {} "$dest/" \;
+          test -f "$dest/libggml-vulkan.so"
+          readelf -d "$dest/libggml-vulkan.so"
+          strip="$sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          test -x "$strip"
+          echo "Native libraries before stripping:"
+          du -sh "$dest"
+          find "$dest" -type f -name '*.so' -exec "$strip" --strip-debug {} +
+          echo "Native libraries after stripping:"
+          du -sh "$dest"
+          ls -lh "$dest"
+          mkdir -p android/app/src/main/assets/licenses
+          cp /tmp/crispasr-vulkan/LICENSE /tmp/crispasr-vulkan/THIRD_PARTY_NOTICES.txt android/app/src/main/assets/licenses/
+          rm -rf /tmp/crispasr-vulkan
+      - name: Dependencies
+        working-directory: samsung-r2t2
+        run: flutter pub get
+      - name: Unit tests
+        working-directory: samsung-r2t2
+        run: flutter test
+      - name: Build installable ARM64 APK
+        working-directory: samsung-r2t2
+        run: |
+          df -h
+          flutter build apk --release --target-platform android-arm64,android-x64
+          df -h
+      - name: Verify small APK has no bundled model
+        working-directory: samsung-r2t2
+        run: |
+          python3 - <<'PY'
+          import pathlib, zipfile
+          apk = pathlib.Path("build/app/outputs/flutter-apk/app-release.apk")
+          print("APK size in bytes:", apk.stat().st_size, flush=True)
+          assert apk.stat().st_size < 250 * 1024**2, "GPU APK exceeds 250 MiB safety limit"
+          with zipfile.ZipFile(apk) as z:
+              assert not any(n.endswith(".gguf") for n in z.namelist())
+              assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
+              assert "lib/arm64-v8a/libomp.so" in z.namelist()
+              assert "lib/arm64-v8a/libggml-vulkan.so" in z.namelist()
+              import re, subprocess, tempfile, os, json
+              sdk = pathlib.Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk")
+              ndk = sdk / "ndk" / "27.2.12479018"
+              # NDK public system libraries (not private Android platform libraries).
+              metadata = json.loads((ndk / "meta" / "system_libs.json").read_text())
+              system = {name for name, api in metadata.items() if int(api) <= 35}
+              assert "libmediandk.so" in system
+              assert "libomp.so" not in system
+              print("Public Android system libraries:", sorted(system))
+              libs = {n.rsplit("/",1)[1] for n in z.namelist() if n.startswith("lib/arm64-v8a/") and n.endswith(".so")}
+              with tempfile.TemporaryDirectory() as tmp:
+                  for name in sorted(libs):
+                      dest = z.extract("lib/arm64-v8a/" + name, tmp)
+                      info = subprocess.check_output(["readelf","-d",dest], text=True)
+                      deps = set(re.findall(r"Shared library: \[(.*?)\]", info))
+                      missing = deps - libs - system
+                      assert not missing, (name, missing)
+              print("ARM64 ELF dependencies checked:", sorted(libs))
+          print("Verified small APK:", apk.stat().st_size)
+          PY
+      - name: Sign with permanent release key
+        working-directory: samsung-r2t2
+        env:
+          SIGNING_SECRET: ${{ secrets.LIVECHINESE_SIGNING_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_SECRET" ]]; then
+            echo "::error::Missing repository secret LIVECHINESE_SIGNING_SECRET"
+            exit 1
+          fi
+          umask 077
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          export SIGNING_PASSWORD="${SIGNING_SECRET%%:*}"
+          printf '%s' "${SIGNING_SECRET#*:}" | base64 -d > "$key"
+          unset SIGNING_SECRET
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          "$tools/apksigner" sign --ks "$key" --ks-type PKCS12 --ks-key-alias livechinese --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD --out "$apk.signed" "$apk"
+          mv "$apk.signed" "$apk"
+          rm -f "$apk.signed.idsig"
+          "$tools/apksigner" verify --print-certs "$apk" | grep -i 'certificate SHA-256 digest: 75d049ba8c0cf82a518fe2cad70a725df5279257f4d73f74bd681523c75931d4'
+      - name: Verify APK signatures and alignment
+        working-directory: samsung-r2t2
+        run: |
+          set -euo pipefail
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$tools/apksigner" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk
+          "$tools/zipalign" -c -P 16 -v 4 build/app/outputs/flutter-apk/app-release.apk > /tmp/apk-alignment.txt
+          tail -1 /tmp/apk-alignment.txt
+      - name: Reclaim build intermediates before emulator
+        working-directory: samsung-r2t2
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v025.apk
+          rm -rf build android/app/src/main/assets/offline-model android/.gradle
+          mkdir -p build/app/outputs/flutter-apk
+          mv /tmp/live-chinese-v025.apk build/app/outputs/flutter-apk/app-release.apk
+          df -h
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install actual release APK on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disk-size: 12G
+          disable-animations: true
+          script: |
+            adb install -r samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
+            adb shell run-as org.livechinese.r2t2_live_chinese true || true
+            adb install -r samsung-r2t2/build/app/outputs/flutter-apk/app-release.apk
+            adb shell pm path org.livechinese.r2t2_live_chinese | grep 'package:'
+            adb shell am start -W -n org.livechinese.r2t2_live_chinese/.MainActivity
+            sleep 8
+            adb shell pidof org.livechinese.r2t2_live_chinese
+      - name: Publish APK as a GitHub release (no artifact quota)
+        working-directory: samsung-r2t2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create samsung-r2t2-a16-v0.25.0 \
+            build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
+            --target "$GITHUB_SHA" \
+            --title "Live Chinese R2T2 – Samsung A16 v0.25.0" \
+            --notes "Model storage manager with confirmation and individual or bulk deletion, retaining selected model and overlay settings. Uses previously validated v0.24 Q3 model; no new download if already installed. Android emulator installation checked; physical ARM64 recognition unverified." \
+            --prerelease

@@ -1,0 +1,68 @@
+name: Test Q3 streaming repetition correction
+on:
+  workflow_dispatch:
+  push:
+    branches: [build-r2t2-samsung-a16-20261124]
+    paths: ['.github/workflows/test-q3-cache.yml']
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Build CrispASR
+        run: |
+          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git engine
+          cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_SERVER=OFF -DGGML_NATIVE=OFF
+          cmake --build engine/build --target crispasr-cli -j 2
+      - name: Obtain verified Q3 and speech
+        run: |
+          curl -fL --retry 4 https://github.com/hh786686-ship-it/a/releases/download/samsung-r2t2-a16-v0.24.0/confucius4-r2t2-q3_k.gguf -o q3.gguf
+          echo '95f7fb5d4d2d52abbfbb86157a7cbdff0ac58be4c983a3fb40c89fbe0fcf86cb  q3.gguf' | sha256sum -c
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng ffmpeg
+          espeak-ng -v cmn -s 145 -w speech.wav '你好，今天天气很好。我们一起去公园散步。'
+          ffmpeg -y -i speech.wav -ar 16000 -ac 1 -c:a pcm_s16le test.wav
+      - name: Compare stock and corrected streaming
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          /usr/bin/time -v engine/build/bin/crispasr -m q3.gguf -f test.wav --backend qwen3 -l zh -t 4 2>&1 | tee results/baseline.log
+          timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/stock.json --step-ms 1000 --lookahead-ms 0 -t 4
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('engine/src/core/qwen3_stream.h')
+          s=p.read_text()
+          # Do not feed unstable text back into the next generation.
+          # Decode from the full audio with an empty prefix instead.
+          old='r.prefix = prefix;'
+          assert s.count(old)==2
+          s=s.replace(old,'prefix.clear();\n    r.prefix = prefix;')
+          # Give complete hypotheses a bounded but sufficient token budget.
+          old='h.generate(st.audio_accum, utf8_encode(prefix), max_new_tokens)'
+          assert s.count(old)==2
+          s=s.replace(old,'h.generate(st.audio_accum, utf8_encode(prefix), std::max(64, max_new_tokens))')
+          p.write_text(s)
+          PY
+          cmake --build engine/build --target crispasr-cli -j 2
+          timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/corrected.json --step-ms 1000 --lookahead-ms 0 -t 4
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          expected='你好今天天气很好我们一起去公园散步'
+          def normalize(s):
+              return ''.join(re.findall(r'[\u4e00-\u9fff]',s or ''))
+          for name in ('stock','corrected'):
+              d=json.loads(Path('results/'+name+'.json').read_text())
+              print(name, 'calls:',len(d['calls']), 'transcript:',d['completed'])
+          corrected=json.loads(Path('results/corrected.json').read_text())
+          assert normalize(corrected['completed'])==expected, 'Corrected streaming failed exact Mandarin transcript gate'
+          PY
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: q3-stream-correction
+          path: results/
+          if-no-files-found: warn
