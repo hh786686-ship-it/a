@@ -1,0 +1,61 @@
+name: Test Q3 split-prefill prerequisite
+on:
+  workflow_dispatch:
+  push:
+    branches: [build-r2t2-samsung-a16-20261124]
+    paths: ['.github/workflows/test-q3-cache.yml']
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Build CrispASR
+        run: |
+          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git engine
+          cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_SERVER=OFF -DGGML_NATIVE=OFF
+          cmake --build engine/build --target crispasr-cli -j 2
+      - name: Obtain verified Q3 and speech
+        run: |
+          curl -fL --retry 4 https://github.com/hh786686-ship-it/a/releases/download/samsung-r2t2-a16-v0.24.0/confucius4-r2t2-q3_k.gguf -o q3.gguf
+          echo '95f7fb5d4d2d52abbfbb86157a7cbdff0ac58be4c983a3fb40c89fbe0fcf86cb  q3.gguf' | sha256sum -c
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng ffmpeg
+          espeak-ng -v cmn -s 145 -w speech.wav '你好，今天天气很好。我们一起去公园散步。'
+          ffmpeg -y -i speech.wav -ar 16000 -ac 1 -c:a pcm_s16le test.wav
+      - name: Baseline and split-prefill prerequisite test
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          /usr/bin/time -v engine/build/bin/crispasr -m q3.gguf -f test.wav --backend qwen3 -l zh -t 4 2>&1 | tee results/baseline.log
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('engine/src/core/qwen3_stream_model.h')
+          s=p.read_text()
+          old='qwen3_asr_kv_reset(ctx_);\n    int n_t = 0, vocab = 0;\n    float* logits = qwen3_asr_run_llm_kv(ctx_, emb, prompt_len, 0, &n_t, &vocab);'
+          assert s.count(old)==1
+          # Compare only embeddings before the first audio placeholder.
+          # Audio is bidirectional, so its previous embeddings cannot safely
+          # be assumed stable when additional audio arrives.
+          new='''int prefix_len = 0;
+              while (prefix_len < prompt_len - 1 && ids[prefix_len] != audio_pad_id) ++prefix_len;
+              qwen3_asr_kv_reset(ctx_);
+              int n_t = 0, vocab = 0;
+              if (prefix_len > 0) {
+                  float* prefix_logits = qwen3_asr_run_llm_kv(ctx_, emb, prefix_len, 0, &n_t, &vocab);
+                  if (!prefix_logits) { free(emb); return {}; }
+                  free(prefix_logits);
+              }
+              float* logits = qwen3_asr_run_llm_kv(ctx_, emb + (size_t)prefix_len * pdim, prompt_len - prefix_len, prefix_len, &n_t, &vocab);'''
+          p.write_text(s.replace(old,new))
+          PY
+          cmake --build engine/build --target crispasr-cli -j 2
+          timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/split.json --step-ms 1000 --lookahead-ms 0 -t 4
+      - name: Upload benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: q3-cache-test
+          path: results/
+          if-no-files-found: warn
