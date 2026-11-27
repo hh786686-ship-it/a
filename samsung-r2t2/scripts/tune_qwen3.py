@@ -16,9 +16,16 @@ edit("qwen3_asr.cpp", "core_gguf::is_gpu_tensor_blk, &threshold,", """[](const c
             const int n = *static_cast<int*>(data);
             const int il = core_gguf::blk_layer_of(name);
             // Keep encoder on Vulkan, but large token/output tables on CPU.
-            return il >= 0 ? il < n : std::strncmp(name, "audio.", 6) == 0;
+            const char* enc = std::getenv("LIVECHINESE_ENCODER_GPU");
+            return il >= 0 ? il < n : (!enc || *enc != '0') && std::strncmp(name, "audio.", 6) == 0;
         }, &threshold,""")
 edit("qwen3_asr.cpp", "fuse_enabled && !blocks.empty()", "fuse_enabled && !(params.use_gpu && params.n_gpu_layers >= 0) && !blocks.empty()")
 edit("crispasr_c_api.cpp", "        s->qwen3_ctx = qwen3_asr_init_from_file(model_path, p);", "        p.n_gpu_layers = g_open_n_gpu_layers_tls;\n        s->qwen3_ctx = qwen3_asr_init_from_file(model_path, p);")
 edit("crispasr_c_api.cpp", "std::max(4096, (int)ids.size() + q3_max_new + 16)", "std::max(128, (int)ids.size() + q3_max_new + 16)")
 print("Applied Qwen3 layer-limit, mixed placement, fusion and cache sizing fixes")
+
+edit("crispasr_c_api.cpp", "#include \"crispasr_session.h\"", "#include \"crispasr_session.h\"\n#include <chrono>\nstatic thread_local double lc_q3_ms[3] = {};\nextern \"C\" __attribute__((visibility(\"default\"))) double livechinese_qwen3_timing_ms(int i) { return i >= 0 && i < 3 ? lc_q3_ms[i] : 0; }")
+edit("crispasr_c_api.cpp", "        const bool raon = qwen3_asr_is_raon_speech(s->qwen3_ctx);\n        int N_enc = 0, pdim = 0;", "        auto lc_mark = std::chrono::steady_clock::now();\n        lc_q3_ms[0] = lc_q3_ms[1] = lc_q3_ms[2] = 0;\n        const bool raon = qwen3_asr_is_raon_speech(s->qwen3_ctx);\n        int N_enc = 0, pdim = 0;")
+edit("crispasr_c_api.cpp", "            if (mel) {\n                audio_embeds = qwen3_asr_run_encoder", "            lc_q3_ms[0] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - lc_mark).count();\n            lc_mark = std::chrono::steady_clock::now();\n            if (mel) {\n                audio_embeds = qwen3_asr_run_encoder")
+edit("crispasr_c_api.cpp", "        // ChatML prompt: <|im_start|>system", "        lc_q3_ms[1] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - lc_mark).count();\n        lc_mark = std::chrono::steady_clock::now();\n        // ChatML prompt: <|im_start|>system")
+edit("crispasr_c_api.cpp", "        // Detokenize, filtering out qwen3's metadata wrapper tokens", "        lc_q3_ms[2] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - lc_mark).count();\n        // Detokenize, filtering out qwen3's metadata wrapper tokens")

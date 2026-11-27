@@ -73,7 +73,7 @@ jobs:
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
             -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DCMAKE_CXX_MODULE_STD=OFF -DCMAKE_CXX_COMPILER_IMPORT_STD= \
             -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_EXAMPLES=OFF -DCRISPASR_BUILD_SERVER=OFF \
-            -DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/tmp/vulkan-headers/include -DCMAKE_CXX_FLAGS=-I/tmp/vulkan-headers/include -DCMAKE_C_FLAGS=-I/tmp/vulkan-headers/include -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
+            -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod -DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/tmp/vulkan-headers/include -DCMAKE_CXX_FLAGS=-I/tmp/vulkan-headers/include -DCMAKE_C_FLAGS=-I/tmp/vulkan-headers/include -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
           cmake --build /tmp/crispasr-vulkan/build --target crispasr-lib -j 2
           dest="$PWD/android/app/src/main/jniLibs/arm64-v8a"
           find /tmp/crispasr-vulkan/build/src /tmp/crispasr-vulkan/build/ggml/src -name 'lib*.so' -exec cp -L {} "$dest/" \;
@@ -168,10 +168,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v019.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v020.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v019.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v020.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -199,9 +199,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.19.0 \
+          gh release create samsung-r2t2-a16-v0.20.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.19.0" \
-            --notes "Experimental Vulkan GPU engine with corrected native layer limits (1/2/3/4/8/16), compact KV options and inference phase diagnostics, CPU fallback after interrupted loading; direct transcription of bounded one-second audio windows, silence gating, four CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.20.0" \
+            --notes "Experimental Vulkan GPU engine with corrected native layer limits (1/2/3/4/8/16), compact KV options, ARM dot-product target, selectable encoder placement and native stage timing, CPU fallback after interrupted loading; direct transcription of bounded one-second audio windows, silence gating, four CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
             --prerelease

@@ -36,6 +36,7 @@ void recognitionWorker(SendPort parent) async {
   parent.send(inbox.sendPort);
   CrispasrSession? session;
   int activeRun = -1;
+  double noiseFloor = 0.0000001;
 
   void closeStream() {
     activeRun = -1;
@@ -51,6 +52,7 @@ void recognitionWorker(SendPort parent) async {
         // Native cache environment is configured before the session opens.
         setNativeEnv('CRISPASR_KV_QUANT', message['compact'] == true ? 'q8_0' : 'f16');
         setNativeEnv('CRISPASR_KV_ON_CPU', message['cpuCache'] == true ? '1' : '0');
+        setNativeEnv('LIVECHINESE_ENCODER_GPU', message['encoderGpu'] == true ? '1' : '0');
         session = CrispasrSession.openWithParams(
           message['path'] as String,
           backend: 'qwen3', useGpu: layers > 0, nThreads: message['threads'] as int? ?? 4, nGpuLayers: layers, flashAttn: false, verbosity: 1,
@@ -68,6 +70,7 @@ void recognitionWorker(SendPort parent) async {
         if (session == null) throw StateError('Load the model first.');
         closeStream();
         activeRun = run;
+        noiseFloor = 0.0000001;
         parent.send({'type': 'started', 'run': run});
       } catch (e) {
         closeStream();
@@ -88,15 +91,24 @@ void recognitionWorker(SendPort parent) async {
         final watch = Stopwatch()..start();
         double energy = 0;
         for (final sample in pcm) { energy += sample * sample; }
-        if (energy / n >= 0.000004) {
+        final mean = energy / n;
+        double peak = 0;
+        for (final sample in pcm) { peak = math.max(peak, sample.abs()); }
+        final speech = mean >= math.max(0.00000016, noiseFloor * 3) || peak >= 0.012;
+        if (!speech) noiseFloor = noiseFloor * 0.9 + mean * 0.1;
+        if (speech) {
           // Decode each bounded PCM chunk directly, bypassing native streams.
           parent.send({'type': 'phase', 'run': run, 'phase': 'Direct transcription'});
           final segments = session!.transcribe(pcm, language: 'zh');
           parent.send({'type': 'phase', 'run': run, 'phase': 'Formatting result'});
+          try {
+            final timings = ffi.DynamicLibrary.open('libcrispasr.so').lookupFunction<ffi.Double Function(ffi.Int32), double Function(int)>('livechinese_qwen3_timing_ms');
+            parent.send({'type': 'timing', 'run': run, 'text': 'Mel ${timings(0).round()}ms · encoder ${timings(1).round()}ms · decoder ${timings(2).round()}ms'});
+          } catch (_) {}
           final text = segments.map((s) => s.text.trim()).where((s) => s.isNotEmpty).join('');
           if (text.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': text});
         }
-        parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds});
+        parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds, 'speech': speech});
       } catch (e) {
         parent.send({'type': 'error', 'run': run, 'message': '$e'});
       }
@@ -193,6 +205,9 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _compactCache = true;
   bool _cpuCache = false;
   int _cpuThreads = 4;
+  bool _encoderGpu = true;
+  int _speechBytes = 0, _silentBytes = 0;
+  String _nativeTiming = 'No decoded speech yet';
   File? _loadMarker;
   bool _checkingRecovery = true;
 
@@ -467,7 +482,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'compact': _compactCache, 'cpuCache': _cpuCache});
+          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'compact': _compactCache, 'cpuCache': _cpuCache, 'encoderGpu': _encoderGpu});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
@@ -492,11 +507,14 @@ class _LiveCaptionsState extends State<LiveCaptions> {
             case 'phase':
               setState(() => _decodePhase = message['phase'] as String);
               break;
+            case 'timing':
+              setState(() => _nativeTiming = message['text'] as String);
+              break;
             case 'processed':
               _decodeStart = null;
               _decodePhase = 'Completed';
               _inFlight = false;
-              setState(() { _processedBytes += message['bytes'] as int; _decodeMs = message['ms'] as int; });
+              setState(() { _processedBytes += message['bytes'] as int; if (message['speech'] == true) { _speechBytes += message['bytes'] as int; _decodeMs = message['ms'] as int; } else { _silentBytes += message['bytes'] as int; } });
               _pumpAudio();
               break;
             case 'chunkCaption':
@@ -543,7 +561,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       await _overlay.invokeMethod('startMicService');
       final nextRun = ++_run;
       _captions.reset();
-      _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _skippedBytes = 0; _micLevel = 0;
+      _speechBytes = 0; _silentBytes = 0; _nativeTiming = 'No decoded speech yet'; _audioBytes = 0; _processedBytes = 0; _decodeMs = 0; _skippedBytes = 0; _micLevel = 0;
       _pendingAudio.clear(); _inFlight = false; _decodeStart = null; _decodePhase = 'Idle';
       unawaited(_syncOverlay());
       _send!.send({'op': 'start', 'run': nextRun});
@@ -620,12 +638,14 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer')), DropdownMenuItem(value: 2, child: Text('GPU 2 layers (default)')), DropdownMenuItem(value: 3, child: Text('GPU 3 layers')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery) ...[
           SwitchListTile(title: const Text('Compact Q8 KV cache', style: TextStyle(color: Colors.white)), value: _compactCache, onChanged: (v) => setState(() => _compactCache = v)),
+          SwitchListTile(title: const Text('Audio encoder on GPU', style: TextStyle(color: Colors.white)), value: _encoderGpu, onChanged: (v) => setState(() => _encoderGpu = v)),
           SwitchListTile(title: const Text('Keep KV cache on CPU', style: TextStyle(color: Colors.white)), value: _cpuCache, onChanged: (v) => setState(() => _cpuCache = v)),
           DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _cpuThreads, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 2, child: Text('2 CPU threads')), DropdownMenuItem(value: 4, child: Text('4 CPU threads')), DropdownMenuItem(value: 6, child: Text('6 CPU threads'))], onChanged: (v) { if (v != null) setState(() => _cpuThreads = v); }),
         ],
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
         if (_listening) ...[
           LinearProgressIndicator(value: (_micLevel * 8).clamp(0.0, 1.0).toDouble()),
+          Text('$_nativeTiming · speech ${(_speechBytes / 32000).toStringAsFixed(1)}s · silence ${(_silentBytes / 32000).toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white70, fontSize: 12)),
           Text('Inference: $_decodePhase · ${_decodeStart == null ? 0 : DateTime.now().difference(_decodeStart!).inSeconds}s running · queue ${(_pendingAudio.length / 32000).toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white, fontSize: 13)),
           Text('Mic ${(20 * math.log(math.max(_micLevel, 0.00001)) / math.ln10).toStringAsFixed(0)} dBFS · received ${(_audioBytes / 32000).toStringAsFixed(1)}s · processed ${(_processedBytes / 32000).toStringAsFixed(1)}s · last decode ${_decodeMs}ms · skipped ${(_skippedBytes / 32000).toStringAsFixed(1)}s', style: const TextStyle(color: Colors.white70, fontSize: 12)),
         ],
