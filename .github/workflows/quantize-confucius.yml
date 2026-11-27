@@ -1,0 +1,49 @@
+name: Quantize Confucius4 for CrispASR
+on:
+  workflow_dispatch:
+  push:
+    branches: [build-r2t2-samsung-a16-20261124]
+    paths: ['.github/workflows/quantize-confucius.yml']
+permissions:
+  contents: read
+jobs:
+  quantize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Build upstream quantizer and CLI
+        run: |
+          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git engine
+          cmake -S engine -B engine/build -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_SERVER=OFF -DGGML_NATIVE=OFF
+          cmake --build engine/build --target crispasr-quantize crispasr -j 2
+      - name: Download and verify original Q4
+        run: |
+          curl --fail --location --retry 4 'https://huggingface.co/cstr/confucius4-r2t2-GGUF/resolve/main/confucius4-r2t2-q4_k.gguf?download=true' -o q4.gguf
+          echo 'a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3  q4.gguf' | sha256sum -c
+          sudo apt-get update
+          sudo apt-get install -y espeak-ng ffmpeg
+          espeak-ng -v cmn -s 145 -w speech.wav '你好，今天天气很好。我们一起去公园散步。'
+          ffmpeg -y -i speech.wav -ar 16000 -ac 1 -c:a pcm_s16le test.wav
+      - name: Convert Q3 and Q2 and compare recognition
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          for quant in q3_k q2_k; do
+            engine/build/bin/crispasr-quantize q4.gguf "results/$quant.gguf" "$quant" 2>&1 | tee "results/$quant-conversion.log"
+            test -s "results/$quant.gguf"
+          done
+          for model in q4.gguf results/q3_k.gguf results/q2_k.gguf; do
+            name="$(basename "$model" .gguf)"
+            /usr/bin/time -v engine/build/bin/crispasr -m "$model" -f test.wav -l zh -t 4 2>&1 | tee "results/$name-recognition.log"
+          done
+          sha256sum results/*.gguf > results/checksums.txt
+          ls -lh results
+      - name: Upload conversion and benchmark logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quantization-test-logs
+          path: |
+            results/*.log
+            results/checksums.txt
+          if-no-files-found: warn
