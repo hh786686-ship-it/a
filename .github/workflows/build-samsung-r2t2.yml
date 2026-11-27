@@ -44,37 +44,6 @@ jobs:
           p.write_text(text.replace("android {", 'android {\n    androidResources { noCompress += "gguf" }', 1))
           PY
           printf '\norg.gradle.vfs.watch=false\norg.gradle.parallel=false\n' >> android/gradle.properties
-      - name: Create and validate Q3 model
-        working-directory: samsung-r2t2
-        run: |
-          set -euo pipefail
-          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr-host
-          cmake -S /tmp/crispasr-host -B /tmp/crispasr-host/build -DCMAKE_BUILD_TYPE=Release -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_SERVER=OFF -DGGML_NATIVE=OFF
-          cmake --build /tmp/crispasr-host/build --target crispasr-quantize crispasr-cli -j 2
-          curl --fail --location --retry 4 'https://huggingface.co/cstr/confucius4-r2t2-GGUF/resolve/main/confucius4-r2t2-q4_k.gguf?download=true' -o /tmp/q4.gguf
-          echo 'a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3  /tmp/q4.gguf' | sha256sum -c
-          /tmp/crispasr-host/build/bin/crispasr-quantize /tmp/q4.gguf /tmp/confucius4-r2t2-q3_k.gguf q3_k
-          sudo apt-get update
-          sudo apt-get install -y espeak-ng ffmpeg
-          espeak-ng -v cmn -s 145 -w /tmp/speech.wav '你好，今天天气很好。我们一起去公园散步。'
-          ffmpeg -y -i /tmp/speech.wav -ar 16000 -ac 1 -c:a pcm_s16le /tmp/test.wav
-          /tmp/crispasr-host/build/bin/crispasr -m /tmp/confucius4-r2t2-q3_k.gguf -f /tmp/test.wav --backend qwen3 -l zh -t 4 2>&1 | tee /tmp/q3-test.log
-          grep -F '今天天气很好' /tmp/q3-test.log
-          grep -F '公园散步' /tmp/q3-test.log
-          python3 - <<'PY'
-          import hashlib
-          from pathlib import Path
-          model = Path('/tmp/confucius4-r2t2-q3_k.gguf')
-          with model.open('rb') as f:
-              digest = hashlib.file_digest(f, 'sha256').hexdigest()
-          assert 100000000 < model.stat().st_size < 1490915264
-          p = Path('lib/main.dart')
-          s = p.read_text()
-          assert 'const q3Bytes = 0;' in s and 'CI_GENERATED_Q3_HASH' in s
-          p.write_text(s.replace('const q3Bytes = 0;', f'const q3Bytes = {model.stat().st_size};').replace('CI_GENERATED_Q3_HASH', digest))
-          print('Q3 bytes:', model.stat().st_size, 'SHA256:', digest)
-          PY
-          rm -rf /tmp/crispasr-host /tmp/q4.gguf
       - name: Install and verify Android engine
         working-directory: samsung-r2t2
         run: |
@@ -197,10 +166,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v024.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v025.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v024.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v025.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -228,10 +197,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.24.0 \
+          gh release create samsung-r2t2-a16-v0.25.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
-            /tmp/confucius4-r2t2-q3_k.gguf \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.24.0" \
-            --notes "Experimental Q3 re-quantization of original CrispASR Q4 model, synthetic Mandarin recognition validated on Linux, original Q4 selectable, CPU defaults, existing overlay and signing retained. Physical Samsung A16 recognition and latency unverified." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.25.0" \
+            --notes "Model storage manager with confirmation and individual or bulk deletion, retaining selected model and overlay settings. Uses previously validated v0.24 Q3 model; no new download if already installed. Android emulator installation checked; physical ARM64 recognition unverified." \
             --prerelease

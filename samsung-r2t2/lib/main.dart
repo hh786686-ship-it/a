@@ -20,8 +20,8 @@ const q4Bytes = 1490915264;
 const q4Hash = 'a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3';
 const q3Url = 'https://github.com/hh786686-ship-it/a/releases/download/samsung-r2t2-a16-v0.24.0/confucius4-r2t2-q3_k.gguf';
 const q3File = 'confucius4-r2t2-q3_k.gguf';
-const q3Bytes = 0;
-const q3Hash = 'CI_GENERATED_Q3_HASH';
+const q3Bytes = 1221091264;
+const q3Hash = '95f7fb5d4d2d52abbfbb86157a7cbdff0ac58be4c983a3fb40c89fbe0fcf86cb';
 
 void main() => runApp(const MaterialApp(
   home: LiveCaptions(), debugShowCheckedModeBanner: false,
@@ -340,6 +340,61 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     return digest.toString() == modelHash;
   }
 
+
+  Future<void> _manageModels() async {
+    if (_loaded || _loadingModel || _downloading || _transferring || _checkingRecovery || _updates != null) return;
+    setState(() => _transferring = true);
+    try {
+      final selected = await _modelPath();
+      final files = <File>[];
+      final sizes = <int>[];
+      await for (final entry in selected.parent.list(followLinks: false)) {
+        if (entry is! File) continue;
+        final name = entry.uri.pathSegments.last.toLowerCase();
+        if (!name.endsWith('.gguf') && !name.endsWith('.gguf.part') && !name.endsWith('.gguf.import')) continue;
+        files.add(entry);
+        sizes.add(await entry.length());
+      }
+      if (!mounted) return;
+      if (files.isEmpty) {
+        setState(() => _status = 'No downloaded models found.');
+        return;
+      }
+      final choice = await showDialog<int>(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Manage downloaded models'),
+        content: SizedBox(width: double.maxFinite, child: ListView(shrinkWrap: true, children: [
+          const Text('Delete unused models to free storage. Overlay settings are not affected.'),
+          for (var i = 0; i < files.length; i++)
+            ListTile(title: Text(files[i].uri.pathSegments.last), subtitle: Text('${(sizes[i] / 1000000000).toStringAsFixed(2)} GB${files[i].path == selected.path ? " · selected model" : ""}'), trailing: const Icon(Icons.delete_outline), onTap: () => Navigator.pop(ctx, i)),
+          TextButton(onPressed: () => Navigator.pop(ctx, -1), child: const Text('Delete all except selected model and its partial download')),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel'))],
+      ));
+      if (choice == null || !mounted) return;
+      final targets = choice == -1 ? files.where((f) => f.path != selected.path && f.path != '${selected.path}.part').toList() : [files[choice]];
+      if (targets.isEmpty) { setState(() => _status = 'No unused models to delete.'); return; }
+      final confirm = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Delete downloaded model files?'),
+        content: Text(targets.map((f) => f.uri.pathSegments.last).join('\n') + '\n\nDeleted models must be downloaded again to use them.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')), TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete'))],
+      ));
+      if (confirm != true || !mounted) return;
+      var freed = 0;
+      for (final f in targets) {
+        if (await FileSystemEntity.type(f.path, followLinks: false) != FileSystemEntityType.file) continue;
+        final bytes = await f.length();
+        await f.delete();
+        freed += bytes;
+        if (f.path == selected.path) { _modelVerified = false; _progress = 0; }
+      }
+      if (mounted) setState(() => _status = 'Freed ${(freed / 1000000000).toStringAsFixed(2)} GB. Overlay settings kept.');
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Storage management error: $e');
+    } finally {
+      if (mounted) setState(() => _transferring = false);
+    }
+  }
+
   Future<void> _transferModel(bool exporting) async {
     if (_transferring || _downloading || _loadingModel || (!exporting && _loaded)) return;
     setState(() { _transferring = true; _status = exporting ? 'Choose a destination for model backup…' : 'Choose your GGUF model file…'; });
@@ -374,7 +429,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   }
 
   Future<void> _download() async {
-    if (_downloading || _loaded || _loadingModel || _transferring) return;
+    if (_downloading || _loaded || _loadingModel || _transferring || _checkingRecovery) return;
     _pauseDownload = false;
     setState(() { _downloading = true; _status = 'Checking model and free space…'; });
     try {
@@ -619,7 +674,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: const Color(0xff111827),
     appBar: AppBar(title: const Text('Live Chinese — R2T2'),
-      backgroundColor: const Color(0xff243044), foregroundColor: Colors.white),
+      backgroundColor: const Color(0xff243044), foregroundColor: Colors.white,
+      actions: [IconButton(tooltip: 'Manage downloaded models', icon: const Icon(Icons.storage), onPressed: (_loaded || _loadingModel || _downloading || _transferring || _checkingRecovery || _updates != null) ? null : _manageModels)]),
     body: SafeArea(child: Padding(
       padding: const EdgeInsets.all(16),
       child: Column(children: [
