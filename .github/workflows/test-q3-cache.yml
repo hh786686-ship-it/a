@@ -1,4 +1,4 @@
-name: Test Q3 streaming repetition correction
+name: Test Q3 Mandarin-conditioned streaming
 on:
   workflow_dispatch:
   push:
@@ -44,6 +44,21 @@ jobs:
           assert s.count(old)==2
           s=s.replace(old,'h.generate(st.audio_accum, utf8_encode(prefix), std::max(64, max_new_tokens))')
           p.write_text(s)
+          # Force Mandarin using exactly the assistant prefill used by the
+          # successful non-streaming C API. Set the parser language too.
+          p=Path('engine/src/crispasr_c_api.cpp')
+          s=p.read_text()
+          old='        state->schedule.init(2560, 2560);'
+          assert s.count(old)==1
+          s=s.replace(old,'        state->algorithm.cfg.force_language = U"Chinese";\n        state->schedule.init(16000, 0);')
+          p.write_text(s)
+          # Stop at the R2T2 delimiter rather than allowing runaway generation.
+          p=Path('engine/src/core/qwen3_stream_model.h')
+          s=p.read_text()
+          old='        if (step + 1 == max_new)'
+          assert s.count(old)==1
+          s=s.replace(old,'        if (bytes.find(\'|\') != std::string::npos || bytes.find(\'#\') != std::string::npos) {\n            bytes.resize(bytes.find_first_of("|#"));\n            break;\n        }\n'+old)
+          p.write_text(s)
           PY
           cmake --build engine/build --target crispasr-cli -j 2
           timeout 600 python3 engine/tools/qwen3_stream_client.py -m q3.gguf -f test.wav -o results/corrected.json --step-ms 1000 --lookahead-ms 0 -t 4
@@ -63,6 +78,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: q3-stream-correction
+          name: q3-mandarin-stream
           path: results/
           if-no-files-found: warn
