@@ -17,6 +17,8 @@ edit("qwen3_asr.cpp", "core_gguf::is_gpu_tensor_blk, &threshold,", """[](const c
             const int il = core_gguf::blk_layer_of(name);
             // Keep encoder on Vulkan, but large token/output tables on CPU.
             const char* enc = std::getenv("LIVECHINESE_ENCODER_GPU");
+            const char* out = std::getenv("LIVECHINESE_OUTPUT_GPU");
+            if (out && *out == '1' && std::strcmp(name, "output.weight") == 0) return true;
             return il >= 0 ? il < n : (!enc || *enc != '0') && std::strncmp(name, "audio.", 6) == 0;
         }, &threshold,""")
 edit("qwen3_asr.cpp", "fuse_enabled && !blocks.empty()", "fuse_enabled && !(params.use_gpu && params.n_gpu_layers >= 0) && !blocks.empty()")

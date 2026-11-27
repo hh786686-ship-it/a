@@ -168,10 +168,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v020.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v021.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v020.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v021.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -199,9 +199,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.20.0 \
+          gh release create samsung-r2t2-a16-v0.21.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.20.0" \
-            --notes "Experimental Vulkan GPU engine with corrected native layer limits (1/2/3/4/8/16), compact KV options, ARM dot-product target, selectable encoder placement and native stage timing, CPU fallback after interrupted loading; direct transcription of bounded one-second audio windows, silence gating, four CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.21.0" \
+            --notes "Experimental Vulkan GPU engine with corrected native layer limits (1/2/3/4/8/16), compact KV options, ARM dot-product target, selectable encoder/output placement and flash attention and native stage timing, CPU fallback after interrupted loading; direct transcription of bounded one-second audio windows, silence gating, four CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
             --prerelease

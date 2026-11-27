@@ -53,9 +53,10 @@ void recognitionWorker(SendPort parent) async {
         setNativeEnv('CRISPASR_KV_QUANT', message['compact'] == true ? 'q8_0' : 'f16');
         setNativeEnv('CRISPASR_KV_ON_CPU', message['cpuCache'] == true ? '1' : '0');
         setNativeEnv('LIVECHINESE_ENCODER_GPU', message['encoderGpu'] == true ? '1' : '0');
+        setNativeEnv('LIVECHINESE_OUTPUT_GPU', message['outputGpu'] == true ? '1' : '0');
         session = CrispasrSession.openWithParams(
           message['path'] as String,
-          backend: 'qwen3', useGpu: layers > 0, nThreads: message['threads'] as int? ?? 4, nGpuLayers: layers, flashAttn: false, verbosity: 1,
+          backend: 'qwen3', useGpu: layers > 0, nThreads: message['threads'] as int? ?? 4, nGpuLayers: layers, flashAttn: message['flash'] == true, verbosity: 1,
         );
         session!.setMaxNewTokens(64);
         parent.send({'type': 'ready', 'kind': 0});
@@ -206,6 +207,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _cpuCache = false;
   int _cpuThreads = 4;
   bool _encoderGpu = true;
+  bool _outputGpu = false;
+  bool _flashAttention = false;
   int _speechBytes = 0, _silentBytes = 0;
   String _nativeTiming = 'No decoded speech yet';
   File? _loadMarker;
@@ -482,7 +485,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'compact': _compactCache, 'cpuCache': _cpuCache, 'encoderGpu': _encoderGpu});
+          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'compact': _compactCache, 'cpuCache': _cpuCache, 'encoderGpu': _encoderGpu, 'outputGpu': _outputGpu, 'flash': _flashAttention});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
@@ -635,9 +638,11 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         )),
         const SizedBox(height: 15),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery)
-          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer')), DropdownMenuItem(value: 2, child: Text('GPU 2 layers (default)')), DropdownMenuItem(value: 3, child: Text('GPU 3 layers')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer')), DropdownMenuItem(value: 2, child: Text('GPU 2 layers (default)')), DropdownMenuItem(value: 3, child: Text('GPU 3 layers')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 6, child: Text('GPU 6 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 12, child: Text('GPU 12 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery) ...[
           SwitchListTile(title: const Text('Compact Q8 KV cache', style: TextStyle(color: Colors.white)), value: _compactCache, onChanged: (v) => setState(() => _compactCache = v)),
+          SwitchListTile(title: const Text('Output matrix on GPU (experimental)', style: TextStyle(color: Colors.white)), value: _outputGpu, onChanged: (v) => setState(() => _outputGpu = v)),
+          SwitchListTile(title: const Text('Flash attention (experimental)', style: TextStyle(color: Colors.white)), value: _flashAttention, onChanged: (v) => setState(() => _flashAttention = v)),
           SwitchListTile(title: const Text('Audio encoder on GPU', style: TextStyle(color: Colors.white)), value: _encoderGpu, onChanged: (v) => setState(() => _encoderGpu = v)),
           SwitchListTile(title: const Text('Keep KV cache on CPU', style: TextStyle(color: Colors.white)), value: _cpuCache, onChanged: (v) => setState(() => _cpuCache = v)),
           DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _cpuThreads, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 2, child: Text('2 CPU threads')), DropdownMenuItem(value: 4, child: Text('4 CPU threads')), DropdownMenuItem(value: 6, child: Text('6 CPU threads'))], onChanged: (v) { if (v != null) setState(() => _cpuThreads = v); }),
