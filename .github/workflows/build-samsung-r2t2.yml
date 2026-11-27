@@ -54,42 +54,20 @@ jobs:
           manager="$(find "$sdk/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
           test -x "$manager"
           "$manager" --sdk_root="$sdk" "ndk;27.2.12479018"
-          python3 scripts/prepare_android_libs.py
-          sudo apt-get update
-          sudo apt-get install -y glslc glslang-tools libvulkan-dev spirv-headers
-          git clone --depth 1 --branch v0.8.55 --recurse-submodules --shallow-submodules https://github.com/CrispStrobe/CrispASR.git /tmp/crispasr-vulkan
-          python3 scripts/tune_qwen3.py /tmp/crispasr-vulkan
-          spirv_config="$(dpkg -L spirv-headers | grep -iE '/spirv-headers(config|-config)[.]cmake' | head -1)"
-          test -f "$spirv_config"
-          # Use recent Khronos headers, isolated from host libc headers.
-          git clone --depth 1 --branch v1.4.328 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/vulkan-headers
-          test -f /tmp/vulkan-headers/include/vulkan/vulkan.hpp
-          test -f /tmp/vulkan-headers/include/vulkan/vulkan_core.h
-          mkdir -p /tmp/vulkan-headers/include/spirv
-          cp -a /usr/include/spirv/. /tmp/vulkan-headers/include/spirv/
-          test -f /tmp/vulkan-headers/include/spirv/unified1/spirv.hpp
-          cmake -S /tmp/crispasr-vulkan -B /tmp/crispasr-vulkan/build -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
-            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DCMAKE_CXX_MODULE_STD=OFF -DCMAKE_CXX_COMPILER_IMPORT_STD= \
-            -DCRISPASR_BUILD_TESTS=OFF -DCRISPASR_BUILD_EXAMPLES=OFF -DCRISPASR_BUILD_SERVER=OFF \
-            -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod -DGGML_VULKAN=ON -DVulkan_INCLUDE_DIR=/tmp/vulkan-headers/include -DCMAKE_CXX_FLAGS=-I/tmp/vulkan-headers/include -DCMAKE_C_FLAGS=-I/tmp/vulkan-headers/include -DSPIRV-Headers_DIR="$(dirname "$spirv_config")" -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH -DVulkan_GLSLC_EXECUTABLE="$(command -v glslc)"
-          cmake --build /tmp/crispasr-vulkan/build --target crispasr-lib -j 2
+          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git /tmp/llama.cpp
+          git -C /tmp/llama.cpp checkout ad6c66839af3c5646fba8c6c2e2087a1e4e38948
+          python3 scripts/official_model_metadata.py
+          cmake -S native_llama -B /tmp/llama-android -G Ninja \
+            -DLLAMA_CPP_DIR=/tmp/llama.cpp -DCMAKE_TOOLCHAIN_FILE="$sdk/ndk/27.2.12479018/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod
+          cmake --build /tmp/llama-android --target livechinese_llama -j 2
           dest="$PWD/android/app/src/main/jniLibs/arm64-v8a"
-          find /tmp/crispasr-vulkan/build/src /tmp/crispasr-vulkan/build/ggml/src -name 'lib*.so' -exec cp -L {} "$dest/" \;
-          test -f "$dest/libggml-vulkan.so"
-          readelf -d "$dest/libggml-vulkan.so"
-          strip="$sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-          test -x "$strip"
-          echo "Native libraries before stripping:"
-          du -sh "$dest"
-          find "$dest" -type f -name '*.so' -exec "$strip" --strip-debug {} +
-          echo "Native libraries after stripping:"
-          du -sh "$dest"
-          ls -lh "$dest"
-          mkdir -p android/app/src/main/assets/licenses
-          cp /tmp/crispasr-vulkan/LICENSE /tmp/crispasr-vulkan/THIRD_PARTY_NOTICES.txt android/app/src/main/assets/licenses/
-          rm -rf /tmp/crispasr-vulkan
+          mkdir -p "$dest" android/app/src/main/assets/licenses
+          cp /tmp/llama-android/liblivechinese_llama.so "$dest/"
+          cp /tmp/llama.cpp/LICENSE android/app/src/main/assets/licenses/llama.cpp-LICENSE
+          "$sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-debug "$dest/liblivechinese_llama.so"
+          rm -rf /tmp/llama.cpp /tmp/llama-android
       - name: Dependencies
         working-directory: samsung-r2t2
         run: flutter pub get
@@ -112,9 +90,7 @@ jobs:
           assert apk.stat().st_size < 250 * 1024**2, "GPU APK exceeds 250 MiB safety limit"
           with zipfile.ZipFile(apk) as z:
               assert not any(n.endswith(".gguf") for n in z.namelist())
-              assert "lib/arm64-v8a/libcrispasr.so" in z.namelist()
-              assert "lib/arm64-v8a/libomp.so" in z.namelist()
-              assert "lib/arm64-v8a/libggml-vulkan.so" in z.namelist()
+              assert "lib/arm64-v8a/liblivechinese_llama.so" in z.namelist()
               import re, subprocess, tempfile, os, json
               sdk = pathlib.Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk")
               ndk = sdk / "ndk" / "27.2.12479018"
@@ -168,10 +144,10 @@ jobs:
       - name: Reclaim build intermediates before emulator
         working-directory: samsung-r2t2
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v021.apk
+          cp build/app/outputs/flutter-apk/app-release.apk /tmp/live-chinese-v022.apk
           rm -rf build android/app/src/main/assets/offline-model android/.gradle
           mkdir -p build/app/outputs/flutter-apk
-          mv /tmp/live-chinese-v021.apk build/app/outputs/flutter-apk/app-release.apk
+          mv /tmp/live-chinese-v022.apk build/app/outputs/flutter-apk/app-release.apk
           df -h
       - name: Enable KVM access
         run: |
@@ -199,9 +175,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create samsung-r2t2-a16-v0.21.0 \
+          gh release create samsung-r2t2-a16-v0.22.0 \
             build/app/outputs/flutter-apk/app-release.apk#LiveChinese-R2T2-A16.apk \
             --target "$GITHUB_SHA" \
-            --title "Live Chinese R2T2 – Samsung A16 v0.21.0" \
-            --notes "Experimental Vulkan GPU engine with corrected native layer limits (1/2/3/4/8/16), compact KV options, ARM dot-product target, selectable encoder/output placement and flash attention and native stage timing, CPU fallback after interrupted loading; direct transcription of bounded one-second audio windows, silence gating, four CPU threads, permanent signing and model import/export, ARM64 OpenMP runtime and ELF dependency verification; resumable checksum-verified single-copy model download, one-line resizable overlay. Android 15 emulator installation tested; physical Samsung A16 and ARM64 recognition not yet tested." \
+            --title "Live Chinese R2T2 – Samsung A16 v0.22.0" \
+            --notes "Experimental official llama.cpp CPU port, two checksum-verified model files, existing overlay retained. Android emulator installation checked; actual ARM64 recognition and latency not verified. Independent one-second windows; no persistent streaming cache yet." \
             --prerelease

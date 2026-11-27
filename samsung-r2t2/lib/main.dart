@@ -1,40 +1,28 @@
 import 'dart:async';
-import 'dart:ffi' as ffi;
-import 'package:ffi/ffi.dart';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
-import 'package:crispasr/crispasr.dart';
+import 'llama_session.dart';
+import 'model_metadata.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
-const modelUrl =
-    'https://huggingface.co/cstr/confucius4-r2t2-GGUF/resolve/main/confucius4-r2t2-q4_k.gguf?download=true';
-const modelFile = 'confucius4-r2t2-q4_k.gguf';
-const modelBytes = 1490915264;
-const modelHash = 'a754788730d7b2a62542de295d37e431e79795d5bea418fa0e4f9618f0f8e3b3';
+
 
 void main() => runApp(const MaterialApp(
   home: LiveCaptions(), debugShowCheckedModeBanner: false,
 ));
 
-void setNativeEnv(String key, String value) {
-  final fn = ffi.DynamicLibrary.open('libc.so').lookupFunction<ffi.Int32 Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, ffi.Int32), int Function(ffi.Pointer<Utf8>, ffi.Pointer<Utf8>, int)>('setenv');
-  final k = key.toNativeUtf8(), v = value.toNativeUtf8();
-  try { if (fn(k, v, 1) != 0) throw StateError('Cannot set $key'); }
-  finally { calloc.free(k); calloc.free(v); }
-}
-
 /// Recognition runs outside the UI isolate to keep the microphone and screen responsive.
 void recognitionWorker(SendPort parent) async {
   final inbox = ReceivePort();
   parent.send(inbox.sendPort);
-  CrispasrSession? session;
+  LlamaSession? session;
   int activeRun = -1;
   double noiseFloor = 0.0000001;
 
@@ -47,18 +35,7 @@ void recognitionWorker(SendPort parent) async {
       closeStream();
       try {
         session?.close();
-        final layers = message['layers'] as int? ?? 0;
-        if (layers > 0) setGpuBackend('vulkan');
-        // Native cache environment is configured before the session opens.
-        setNativeEnv('CRISPASR_KV_QUANT', message['compact'] == true ? 'q8_0' : 'f16');
-        setNativeEnv('CRISPASR_KV_ON_CPU', message['cpuCache'] == true ? '1' : '0');
-        setNativeEnv('LIVECHINESE_ENCODER_GPU', message['encoderGpu'] == true ? '1' : '0');
-        setNativeEnv('LIVECHINESE_OUTPUT_GPU', message['outputGpu'] == true ? '1' : '0');
-        session = CrispasrSession.openWithParams(
-          message['path'] as String,
-          backend: 'qwen3', useGpu: layers > 0, nThreads: message['threads'] as int? ?? 4, nGpuLayers: layers, flashAttn: message['flash'] == true, verbosity: 1,
-        );
-        session!.setMaxNewTokens(64);
+        session = LlamaSession.open(message['path'] as String, message['projector'] as String, message['threads'] as int? ?? 4);
         parent.send({'type': 'ready', 'kind': 0});
       } catch (e) {
         try { session?.close(); } catch (_) {}
@@ -100,13 +77,8 @@ void recognitionWorker(SendPort parent) async {
         if (speech) {
           // Decode each bounded PCM chunk directly, bypassing native streams.
           parent.send({'type': 'phase', 'run': run, 'phase': 'Direct transcription'});
-          final segments = session!.transcribe(pcm, language: 'zh');
-          parent.send({'type': 'phase', 'run': run, 'phase': 'Formatting result'});
-          try {
-            final timings = ffi.DynamicLibrary.open('libcrispasr.so').lookupFunction<ffi.Double Function(ffi.Int32), double Function(int)>('livechinese_qwen3_timing_ms');
-            parent.send({'type': 'timing', 'run': run, 'text': 'Mel ${timings(0).round()}ms · encoder ${timings(1).round()}ms · decoder ${timings(2).round()}ms'});
-          } catch (_) {}
-          final text = segments.map((s) => s.text.trim()).where((s) => s.isNotEmpty).join('');
+          final text = session!.transcribe(pcm);
+          parent.send({'type': 'timing', 'run': run, 'text': 'llama.cpp audio ${session!.timing(0).round()}ms · decoder ${session!.timing(1).round()}ms'});
           if (text.isNotEmpty) parent.send({'type': 'chunkCaption', 'run': run, 'text': text});
         }
         parent.send({'type': 'processed', 'run': run, 'bytes': data.length, 'ms': watch.elapsedMilliseconds, 'speech': speech});
@@ -202,13 +174,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _pauseDownload = false;
   bool _modelVerified = false;
   bool _loadingModel = false;
-  int _gpuLayers = 2;
-  bool _compactCache = true;
-  bool _cpuCache = false;
+  int _gpuLayers = 0;
   int _cpuThreads = 4;
-  bool _encoderGpu = true;
-  bool _outputGpu = false;
-  bool _flashAttention = false;
   int _speechBytes = 0, _silentBytes = 0;
   String _nativeTiming = 'No decoded speech yet';
   File? _loadMarker;
@@ -217,7 +184,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   Future<void> _clearLoadMarker() async {
     try { final marker = _loadMarker; if (marker != null && await marker.exists()) await marker.delete(); } catch (_) {}
   }
-  bool _transferring = false;
+  final bool _transferring = false;
   int _audioBytes = 0, _processedBytes = 0, _decodeMs = 0, _skippedBytes = 0;
   double _micLevel = 0;
   final BytesBuilder _pendingAudio = BytesBuilder(copy: true);
@@ -325,43 +292,10 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     return File('${models.path}/$modelFile');
   }
 
-  Future<bool> _verifyModel(File file) async {
-    if (!await file.exists() || await file.length() != modelBytes) return false;
+  Future<bool> _verifyModel(File file, {int size = modelBytes, String hash = modelHash}) async {
+    if (!await file.exists() || await file.length() != size) return false;
     final digest = await sha256.bind(file.openRead()).first;
-    return digest.toString() == modelHash;
-  }
-
-  Future<void> _transferModel(bool exporting) async {
-    if (_transferring || _downloading || _loadingModel || (!exporting && _loaded)) return;
-    setState(() { _transferring = true; _status = exporting ? 'Choose a destination for model backup…' : 'Choose your GGUF model file…'; });
-    File? temporary;
-    try {
-      final file = await _modelPath();
-      if (exporting) {
-        if (!_modelVerified && !await _verifyModel(file)) throw StateError('No verified model to export.');
-        final ok = await _overlay.invokeMethod<bool>('exportModel', {'path': file.path}) ?? false;
-        if (mounted) setState(() => _status = ok ? 'Model backup saved.' : 'Backup cancelled.');
-      } else {
-        if (await _verifyModel(file)) {
-          _modelVerified = true;
-          if (mounted) setState(() => _status = 'Verified model already present.');
-          return;
-        }
-        temporary = File('${file.path}.import');
-        final ok = await _overlay.invokeMethod<bool>('importModel', {'path': temporary.path}) ?? false;
-        if (!ok) { if (mounted) setState(() => _status = 'Import cancelled.'); return; }
-        if (mounted) setState(() => _status = 'Verifying imported model…');
-        if (!await _verifyModel(temporary)) throw StateError('Incorrect model SHA-256.');
-        await temporary.rename(file.path);
-        _modelVerified = true;
-        if (mounted) setState(() => _status = 'Imported verified model. Tap Load model.');
-      }
-    } catch (e) {
-      if (mounted) setState(() => _status = 'Model transfer error: $e');
-    } finally {
-      if (temporary != null && await temporary.exists()) await temporary.delete();
-      if (mounted) setState(() => _transferring = false);
-    }
+    return digest.toString() == hash;
   }
 
   Future<void> _download() async {
@@ -369,28 +303,31 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     _pauseDownload = false;
     setState(() { _downloading = true; _status = 'Checking model and free space…'; });
     try {
-      final file = await _modelPath();
-      if (_modelVerified || await _verifyModel(file)) {
-        _modelVerified = true;
-        if (mounted) setState(() { _progress = 1; _status = 'Verified model ready. Tap Load model.'; });
-        return;
+      final decoder = await _modelPath();
+      for (final isProjector in [false, true]) {
+      final file = isProjector ? File('${decoder.parent.path}/$projectorFile') : decoder;
+      final size = isProjector ? projectorBytes : modelBytes;
+      final hash = isProjector ? projectorHash : modelHash;
+      final url = isProjector ? projectorUrl : modelUrl;
+      if (await _verifyModel(file, size: size, hash: hash)) {
+        continue;
       }
       // Keep just one file. A partial download is renamed in place after verification.
       if (await file.exists()) await file.delete();
       final partial = File('${file.path}.part');
-      if (await partial.exists() && await partial.length() > modelBytes) await partial.delete();
+      if (await partial.exists() && await partial.length() > size) await partial.delete();
       for (var attempt = 0; attempt < 5 && !_pauseDownload; attempt++) {
         final offset = await partial.exists() ? await partial.length() : 0;
-        if (offset == modelBytes) break;
+        if (offset == size) break;
         final free = await _overlay.invokeMethod<int>('availableStorage', {'path': file.parent.path});
-        if (free != null && free < modelBytes - offset + 64 * 1024 * 1024) {
+        if (free != null && free < size - offset + 64 * 1024 * 1024) {
           throw StateError('Not enough internal storage for remaining model bytes.');
         }
         final client = HttpClient()..connectionTimeout = const Duration(seconds: 25)..autoUncompress = false;
         _downloadClient = client;
         RandomAccessFile? output;
         try {
-          final request = await client.getUrl(Uri.parse(modelUrl)).timeout(const Duration(seconds: 30));
+          final request = await client.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 30));
           request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
           request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-');
           final response = await request.close().timeout(const Duration(seconds: 45));
@@ -398,7 +335,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           if (response.statusCode == 206) {
             final match = RegExp(r'^bytes (\d+)-(\d+)/(\d+)$').firstMatch(range ?? '');
             if (match == null || int.parse(match.group(1)!) != offset ||
-                int.parse(match.group(3)!) != modelBytes) {
+                int.parse(match.group(3)!) != size) {
               throw StateError('Server returned an incorrect byte range.');
             }
           } else if (response.statusCode != 200 || offset != 0) {
@@ -409,14 +346,14 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           var lastUpdate = DateTime.now().subtract(const Duration(seconds: 1));
           await for (final bytes in response.timeout(const Duration(seconds: 35))) {
             if (_pauseDownload) break;
-            if (received + bytes.length > modelBytes) throw StateError('Unexpected model length.');
+            if (received + bytes.length > size) throw StateError('Unexpected model length.');
             await output.writeFrom(bytes);
             received += bytes.length;
             final now = DateTime.now();
             if (mounted && now.difference(lastUpdate).inMilliseconds >= 500) {
               lastUpdate = now;
-              setState(() { _progress = received / modelBytes;
-                _status = 'Downloading: ${(received / 1000000).toStringAsFixed(0)} / 1491 MB'; });
+              setState(() { _progress = received / size;
+                _status = 'Downloading: ${(received / 1000000).toStringAsFixed(0)} / ${(size / 1000000).toStringAsFixed(0)} MB'; });
             }
           }
           await output.flush();
@@ -428,7 +365,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           client.close(force: true);
           _downloadClient = null;
         }
-        if (!_pauseDownload && await partial.exists() && await partial.length() < modelBytes) {
+        if (!_pauseDownload && await partial.exists() && await partial.length() < size) {
           if (mounted) setState(() => _status = 'Connection interrupted. Resuming automatically…');
           await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
         }
@@ -437,15 +374,16 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         if (mounted) setState(() => _status = 'Paused. Tap Download / resume to continue.');
         return;
       }
-      if (!await partial.exists() || await partial.length() != modelBytes) {
+      if (!await partial.exists() || await partial.length() != size) {
         throw StateError('Download incomplete. Tap Download / resume.');
       }
       if (mounted) setState(() { _progress = 1; _status = 'Verifying SHA-256 checksum…'; });
-      if (!await _verifyModel(partial)) {
+      if (!await _verifyModel(partial, size: size, hash: hash)) {
         await partial.delete();
         throw StateError('Model checksum mismatch. Download again.');
       }
       await partial.rename(file.path);
+      }
       _modelVerified = true;
       if (mounted) setState(() => _status = 'Verified model ready. Tap Load model.');
     } catch (e) {
@@ -467,7 +405,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     final model = await _modelPath();
     if (mounted) setState(() => _status = 'Checking installed model…');
     try {
-      _modelVerified = _modelVerified || await _verifyModel(model);
+      _modelVerified = await _verifyModel(model) && await _verifyModel(File('${model.parent.path}/$projectorFile'), size: projectorBytes, hash: projectorHash);
     } catch (_) { _modelVerified = false; }
     if (!mounted) return;
     if (!_modelVerified) {
@@ -485,7 +423,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'compact': _compactCache, 'cpuCache': _cpuCache, 'encoderGpu': _encoderGpu, 'outputGpu': _outputGpu, 'flash': _flashAttention});
+          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'projector': '${model.parent.path}/$projectorFile'});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
@@ -637,14 +575,8 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           ),
         )),
         const SizedBox(height: 15),
-        if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery)
-          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 0, child: Text('CPU only')), DropdownMenuItem(value: 1, child: Text('GPU 1 layer')), DropdownMenuItem(value: 2, child: Text('GPU 2 layers (default)')), DropdownMenuItem(value: 3, child: Text('GPU 3 layers')), DropdownMenuItem(value: 4, child: Text('GPU 4 layers')), DropdownMenuItem(value: 6, child: Text('GPU 6 layers')), DropdownMenuItem(value: 8, child: Text('GPU 8 layers')), DropdownMenuItem(value: 12, child: Text('GPU 12 layers')), DropdownMenuItem(value: 16, child: Text('GPU 16 layers'))], onChanged: (v) { if (v != null) setState(() => _gpuLayers = v); }),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery) ...[
-          SwitchListTile(title: const Text('Compact Q8 KV cache', style: TextStyle(color: Colors.white)), value: _compactCache, onChanged: (v) => setState(() => _compactCache = v)),
-          SwitchListTile(title: const Text('Output matrix on GPU (experimental)', style: TextStyle(color: Colors.white)), value: _outputGpu, onChanged: (v) => setState(() => _outputGpu = v)),
-          SwitchListTile(title: const Text('Flash attention (experimental)', style: TextStyle(color: Colors.white)), value: _flashAttention, onChanged: (v) => setState(() => _flashAttention = v)),
-          SwitchListTile(title: const Text('Audio encoder on GPU', style: TextStyle(color: Colors.white)), value: _encoderGpu, onChanged: (v) => setState(() => _encoderGpu = v)),
-          SwitchListTile(title: const Text('Keep KV cache on CPU', style: TextStyle(color: Colors.white)), value: _cpuCache, onChanged: (v) => setState(() => _cpuCache = v)),
+          const Text('Official llama.cpp CPU engine', style: TextStyle(color: Colors.white)),
           DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _cpuThreads, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 2, child: Text('2 CPU threads')), DropdownMenuItem(value: 4, child: Text('4 CPU threads')), DropdownMenuItem(value: 6, child: Text('6 CPU threads'))], onChanged: (v) { if (v != null) setState(() => _cpuThreads = v); }),
         ],
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),
@@ -662,10 +594,6 @@ class _LiveCaptionsState extends State<LiveCaptions> {
             child: Text(_downloading ? 'Pause download' : '1. Download / resume')),
           ElevatedButton(onPressed: (_loaded || _downloading || _loadingModel || _checkingRecovery) ? null : _load,
             child: const Text('2. Load model')),
-          ElevatedButton(onPressed: (_transferring || _downloading || _loaded || _loadingModel) ? null : () => _transferModel(false),
-            child: const Text('Import model')),
-          ElevatedButton(onPressed: (_transferring || _downloading || !_modelVerified) ? null : () => _transferModel(true),
-            child: const Text('Backup model')),
           ElevatedButton(onPressed: _toggleMic,
             child: Text(_listening ? 'Stop listening' : '3. Start listening')),
           ElevatedButton(onPressed: _showOverlay,
