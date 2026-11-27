@@ -35,7 +35,7 @@ void recognitionWorker(SendPort parent) async {
       closeStream();
       try {
         session?.close();
-        session = LlamaSession.open(message['path'] as String, message['projector'] as String, message['threads'] as int? ?? 4);
+        session = LlamaSession.open(message['path'] as String, message['projector'] as String, message['threads'] as int? ?? 4, message['layers'] as int? ?? 0, message['encoderGpu'] == true, message['tokens'] as int? ?? 16);
         parent.send({'type': 'ready', 'kind': 0});
       } catch (e) {
         try { session?.close(); } catch (_) {}
@@ -176,6 +176,9 @@ class _LiveCaptionsState extends State<LiveCaptions> {
   bool _loadingModel = false;
   int _gpuLayers = 0;
   int _cpuThreads = 4;
+  bool _encoderGpu = false;
+  int _tokens = 16;
+  int _windowMs = 1000;
   int _speechBytes = 0, _silentBytes = 0;
   String _nativeTiming = 'No decoded speech yet';
   File? _loadMarker;
@@ -210,16 +213,16 @@ class _LiveCaptionsState extends State<LiveCaptions> {
       if (!mounted) return;
       setState(() {
         _checkingRecovery = false;
-        if (interrupted) { _gpuLayers = 0; _status = 'Previous GPU load interrupted. CPU selected for safe recovery.'; }
+        if (interrupted) { _encoderGpu = false; _gpuLayers = 0; _status = 'Previous GPU load interrupted. CPU selected for safe recovery.'; }
       });
       await _clearLoadMarker();
     });
   }
 
   void _pumpAudio() {
-    if (!_listening || _inFlight || _pendingAudio.length < 32000) return;
+    if (!_listening || _inFlight || _pendingAudio.length < _windowMs * 32) return;
     final queued = _pendingAudio.takeBytes();
-    final count = math.min(queued.length, 32000);
+    final count = math.min(queued.length, _windowMs * 32);
     _inFlight = true;
     _decodeStart = DateTime.now();
     _decodePhase = 'Queued for worker';
@@ -417,13 +420,13 @@ class _LiveCaptionsState extends State<LiveCaptions> {
     final layers = _gpuLayers;
     setState(() => _status = 'Loading model ($layers GPU layers)…');
     try {
-      if (layers > 0) await _loadMarker!.writeAsString('$layers', flush: true);
+      if (layers > 0 || _encoderGpu) await _loadMarker!.writeAsString('$layers', flush: true);
       _updates = ReceivePort();
       _worker = await Isolate.spawn(recognitionWorker, _updates!.sendPort, onError: _updates!.sendPort, onExit: _updates!.sendPort);
       _updates!.listen((message) {
         if (message is SendPort) {
           _send = message;
-          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'projector': '${model.parent.path}/$projectorFile'});
+          _send!.send({'op': 'load', 'path': model.path, 'layers': layers, 'threads': _cpuThreads, 'encoderGpu': _encoderGpu, 'tokens': _tokens, 'projector': '${model.parent.path}/$projectorFile'});
         } else if ((message == null || message is List) && mounted) {
           _micSub?.cancel();
           unawaited(_recorder.stop());
@@ -434,7 +437,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
           if (run is int && run != _run) return;
           switch (message['type']) {
             case 'ready':
-              unawaited(_clearLoadMarker());
+              // Keep crash marker until clean stop.
               setState(() { _loadingModel = false; _loaded = true; _status = layers > 0 ? '$layers GPU layers requested. Tap Start listening.' : 'CPU mode ready. Tap Start listening.'; });
               break;
             case 'started':
@@ -485,6 +488,7 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         await _micSub?.cancel();
         _micSub = null;
         await _recorder.stop();
+        await _clearLoadMarker();
         try { await _overlay.invokeMethod('stopMicService'); } catch (_) {}
         _send?.send({'op': 'stop', 'run': _run});
         if (mounted) setState(() { _listening = false; _status = 'Stopped'; });
@@ -576,7 +580,11 @@ class _LiveCaptionsState extends State<LiveCaptions> {
         )),
         const SizedBox(height: 15),
         if (!_loaded && !_loadingModel && _updates == null && !_checkingRecovery) ...[
-          const Text('Official llama.cpp CPU engine', style: TextStyle(color: Colors.white)),
+          const Text('llama.cpp experimental acceleration', style: TextStyle(color: Colors.white)),
+          SwitchListTile(title: const Text('Vulkan audio encoder', style: TextStyle(color: Colors.white)), value: _encoderGpu, onChanged: (v) => setState(() => _encoderGpu = v)),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _gpuLayers, items: [for(final n in [0,1,2,4,8,16]) DropdownMenuItem(value:n, child: Text('$n GPU decoder layers', style: const TextStyle(color: Colors.white)))], onChanged:(v){if(v!=null)setState(()=>_gpuLayers=v);}),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _tokens, items: [for(final n in [8,16,32]) DropdownMenuItem(value:n, child: Text('$n max tokens', style: const TextStyle(color: Colors.white)))], onChanged:(v){if(v!=null)setState(()=>_tokens=v);}),
+          DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _windowMs, items: [for(final n in [500,1000,2000]) DropdownMenuItem(value:n, child: Text('$n ms audio window', style: const TextStyle(color: Colors.white)))], onChanged:(v){if(v!=null)setState(()=>_windowMs=v);}),
           DropdownButton<int>(dropdownColor: const Color(0xff243044), value: _cpuThreads, style: const TextStyle(color: Colors.white), items: const [DropdownMenuItem(value: 2, child: Text('2 CPU threads')), DropdownMenuItem(value: 4, child: Text('4 CPU threads')), DropdownMenuItem(value: 6, child: Text('6 CPU threads'))], onChanged: (v) { if (v != null) setState(() => _cpuThreads = v); }),
         ],
         Text(_status, style: const TextStyle(color: Color(0xffcbd5e1))),

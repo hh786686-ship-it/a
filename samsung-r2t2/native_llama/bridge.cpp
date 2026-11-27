@@ -13,16 +13,18 @@ struct Engine {
     mtmd_context *audio = nullptr;
     std::string text;
     double encoder = 0, decoder = 0;
+    int max_tokens = 16;
     ~Engine() { if(audio) mtmd_free(audio); if(ctx) llama_free(ctx); if(model) llama_model_free(model); }
 };
 static thread_local std::string error;
 #define EXPORT extern "C" __attribute__((visibility("default")))
 EXPORT const char *lc_error() { return error.c_str(); }
-EXPORT void *lc_open(const char *model, const char *projector, int threads) {
+EXPORT void *lc_open(const char *model, const char *projector, int threads, int layers, int encoder_gpu, int tokens) {
     try {
         auto e = std::make_unique<Engine>();
         llama_backend_init();
-        auto mp = llama_model_default_params(); mp.n_gpu_layers = 0;
+        e->max_tokens = std::clamp(tokens, 4, 32);
+        auto mp = llama_model_default_params(); mp.n_gpu_layers = layers;
         e->model = llama_model_load_from_file(model, mp);
         if(!e->model) throw std::runtime_error("decoder load failed");
         auto cp = llama_context_default_params();
@@ -31,7 +33,7 @@ EXPORT void *lc_open(const char *model, const char *projector, int threads) {
         cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED; cp.offload_kqv = false;
         e->ctx = llama_init_from_model(e->model, cp);
         if(!e->ctx) throw std::runtime_error("decoder context failed");
-        auto ap = mtmd_context_params_default(); ap.use_gpu = false; ap.n_threads = threads; ap.warmup = false;
+        auto ap = mtmd_context_params_default(); ap.use_gpu = encoder_gpu != 0; ap.n_threads = threads; ap.warmup = false;
         e->audio = mtmd_init_from_file(projector, e->model, ap);
         if(!e->audio || !mtmd_support_audio(e->audio)) throw std::runtime_error("audio projector load failed");
         return e.release();
@@ -70,7 +72,7 @@ EXPORT const char *lc_transcribe(void *p, const float *pcm, int n) {
         if(!sampler) throw std::runtime_error("sampler failed");
         const auto *vocab=llama_model_get_vocab(e.model);
         e.text.clear();
-        for(int i=0;i<32;++i) {
+        for(int i=0;i<e.max_tokens;++i) {
             auto tok=llama_sampler_sample(sampler.get(),e.ctx,-1);
             if(llama_vocab_is_eog(vocab,tok)) break;
             char buf[512]; int len=llama_token_to_piece(vocab,tok,buf,sizeof(buf),0,false);
